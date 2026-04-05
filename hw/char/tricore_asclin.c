@@ -246,6 +246,36 @@ static uint64_t uart_read(void *opaque, hwaddr offset, unsigned size)
         /* get last received byte */
         r = s->rxbuf[s->rxbufreadidx];
         break;
+    case 0x104 / 4:  /* TC4x TXFIFOCON */
+        r = s->regs[TXFIFOCON];
+        break;
+    case 0x108 / 4:  /* TC4x RXFIFOCON */
+        r = s->regs[RXFIFOCON];
+        break;
+    case 0x140 / 4:  /* TC4x TXDATA */
+        r = 0;
+        break;
+    case 0x160 / 4:  /* TC4x RXDATA */
+    {
+        r = s->rxbuf[s->rxbufreadidx];
+        if (s->rxbufreadidx != s->rxbufwriteidx) {
+            s->rxbufreadidx = (s->rxbufreadidx + 1) % ASCLIN_RX_BUFFER;
+        }
+        break;
+    }
+    case 0x114 / 4:  /* TC4x BRD */
+    case 0x118 / 4:
+    case 0x120 / 4:
+    case 0x138 / 4:
+        r = 0;
+        break;
+    case 0x13c / 4:  /* TC4x CSR */
+    {
+        uint32_t csr = s->regs[CSR];
+        csr |= (csr & 0x0f) ? (1u << 31) : 0;
+        r = csr;
+        break;
+    }
     default:
         error_report("asclin_uart: read access to unknown register 0x"
         HWADDR_FMT_plx, reg_addr << 2);
@@ -267,17 +297,19 @@ static void uart_write(void *opaque, hwaddr offset, uint64_t value,
     reg_addr = offset >> 2;
     value = value << ((offset & 0x3) * 0x8);
 
-    if (size == 1) {
-        uint32_t old_value = s->regs[reg_addr];
-        uint32_t shifter = offset & 3;
-        old_value &= ~(0xFF << (shifter * 8));
-        value |= old_value;
-    }
-    if (size == 2) {
-        uint32_t old_value = s->regs[reg_addr];
-        uint32_t shifter = offset & 3;
-        old_value &= ~(0xFFFF << (shifter * 8));
-        value |= old_value;
+    if (reg_addr < ASCLIN_R_MAX) {
+        if (size == 1) {
+            uint32_t old_value = s->regs[reg_addr];
+            uint32_t shifter = offset & 3;
+            old_value &= ~(0xFF << (shifter * 8));
+            value |= old_value;
+        }
+        if (size == 2) {
+            uint32_t old_value = s->regs[reg_addr];
+            uint32_t shifter = offset & 3;
+            old_value &= ~(0xFFFF << (shifter * 8));
+            value |= old_value;
+        }
     }
 
     switch (reg_addr) {
@@ -354,6 +386,28 @@ static void uart_write(void *opaque, hwaddr offset, uint64_t value,
         free(buf);
         break;
     }
+    case 0x140 / 4:  /* TC4x TXDATA */
+        s->txbuf = value;
+        uart_transmit(NULL, G_IO_OUT, s);
+        break;
+    case 0x104 / 4:  /* TC4x TXFIFOCON */
+    case 0x10c / 4:  /* TC4x RXFIFOCON */
+    case 0x100 / 4:  /* TC4x FRAMECON */
+    case 0x108 / 4:  /* TC4x DATCON */
+    case 0x130 / 4:  /* TC4x FLAGSCLEAR */
+    case 0x128 / 4:  /* TC4x FLAGS */
+    case 0x12c / 4:  /* TC4x FLAGSSET */
+    case 0x134 / 4:  /* TC4x FLAGSENABLE */
+    case 0x110 / 4:  /* TC4x BRG */
+    case 0x114 / 4:  /* TC4x BRD */
+        break;
+    case 0x120 / 4:
+    case 0x118 / 4:
+    case 0x138 / 4:
+        break;
+    case 0x13c / 4:  /* TC4x CSR */
+        s->regs[CSR] = value;
+        break;
     default:
         error_report("asclin_uart: write access to unknown register 0x"
         HWADDR_FMT_plx, reg_addr << 2);
@@ -430,7 +484,7 @@ static void asclin_uart_init(Object *obj)
     TriCoreASCLINState *s = TRICORE_ASCLIN(obj);
 
     memory_region_init_io(&s->iomem, obj, &asclin_uart_mmio_ops, s, "uart",
-            0xFF);
+            0x200);
     sysbus_init_mmio(sbd, &s->iomem);
     sysbus_init_irq(sbd, &s->RXSR);
     sysbus_init_irq(sbd, &s->TXSR);

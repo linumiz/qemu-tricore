@@ -339,7 +339,6 @@ static uint64_t tricore_scu_read(void *opaque, hwaddr offset, unsigned size)
         r = s->OSCCON;
         break;
     case 0x14:
-        //r = s->PLLSTAT | (1 << 5);  /* SYSPLLSTAT: LOCK + K2RDY */
         r = 0x00000077;
         break;
     case 0x18:
@@ -352,7 +351,6 @@ static uint64_t tricore_scu_read(void *opaque, hwaddr offset, unsigned size)
         r = s->PLLCON[2];
         break;
     case 0x24:
-        //r = (1 << 2) | (1 << 5) | (1 << 6);  /* PERPLLSTAT: LOCK + K2RDY + K3RDY */
         r = 0x00000077;
         break;
     case 0x30:
@@ -370,6 +368,25 @@ static uint64_t tricore_scu_read(void *opaque, hwaddr offset, unsigned size)
         break;
     case 0x140:
         r = 0x47477172 | (1 << 31);
+        break;
+    /* TC4x CCU registers (base 0xF0064000) */
+    case 0x20c:
+        /* RAMPSTAT: ACTIVE[23]=1, FSTAT[17:16]=1, FLLLOCK[24]=1 */
+        r = (1 << 23) | (1 << 16) | (1 << 24);
+        break;
+    case 0x30c:
+        /* SYSPLLSTAT: derive PWRSTAT from SYSPLLCON0.PLLPWR */
+        r = s->regs[0x300 >> 2] & 0x1;        /* PWRSTAT = PLLPWR */
+        r |= (s->regs[0x300 >> 2] & 0x1) << 1; /* PLLLOCK follows PWRSTAT */
+        break;
+    case 0x38c:
+        /* PERPLLSTAT: derive PWRSTAT from PERPLLCON0.PLLPWR */
+        r = s->regs[0x380 >> 2] & 0x1;
+        r |= (s->regs[0x380 >> 2] & 0x1) << 1;
+        break;
+    case 0x404:
+        /* CCUSTAT: LCK=0 */
+        r = 0;
         break;
     default:
         r = s->regs[offset >> 2];
@@ -440,7 +457,7 @@ static void tricore_scu_init(Object *obj)
     tricore_scu_reset(OBJECT(s), RESET_TYPE_COLD);
 
     /* map memory */
-    memory_region_init_io(&s->iomem, OBJECT(s), &tricore_scu_ops, s, "tricore_scu", 0x400);
+    memory_region_init_io(&s->iomem, OBJECT(s), &tricore_scu_ops, s, "tricore_scu", 0x1000);
     
     sysbus_init_irq(sbd, &s->reset_line);
 }

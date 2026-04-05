@@ -97,7 +97,7 @@ typedef struct {
     uint32_t WDTSCON0;
     uint32_t WDTSCON1;
     uint32_t WDTCPU0CON0;
-    uint32_t regs[0x400 / 4];
+    uint32_t regs[0x1000 / 4];
 } TriCoreSCUState;
 
 uint32_t tricore_scu_get_stmclock(TriCoreSCUState *s);

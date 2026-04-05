@@ -91,6 +91,7 @@ typedef struct {
     qemu_irq irq;
     uint32_t freq_hz;
     uint64_t tim_counter;
+    bool tc4x_mode;
 } TriCoreSTMState;
 
 #endif

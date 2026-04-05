@@ -220,7 +220,11 @@ static uint64_t tricore_stm_read(void *opaque, hwaddr offset, unsigned size)
         r = tricore_stm_get_tim_update_regs(s, 12, 1);
         break;
     case TIM4:
-        r = tricore_stm_get_tim_update_regs(s, 16, 1);
+        if (s->tc4x_mode) {
+            r = tricore_stm_get_tim_update_regs(s, 0, 1);
+        } else {
+            r = tricore_stm_get_tim_update_regs(s, 16, 1);
+        }
         break;
     case TIM5:
         r = tricore_stm_get_tim_update_regs(s, 20, 1);
@@ -345,11 +349,16 @@ static void tricore_stm_init(Object *obj)
     s->tim_counter = 0x0;
 }
 
+static const Property tricore_stm_properties[] = {
+    DEFINE_PROP_BOOL("tc4x-mode", TriCoreSTMState, tc4x_mode, false),
+};
+
 static void tricore_stm_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     dc->legacy_reset = tricore_stm_reset;
     dc->realize = tricore_stm_realize;
+    device_class_set_props(dc, tricore_stm_properties);
 }
 
 static const TypeInfo tricore_stm_info = {
