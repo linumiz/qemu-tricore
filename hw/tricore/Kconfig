@@ -10,6 +10,12 @@ config TRIBOARD
     select TC27X_SOC
     select TC39X_SOC
 
+config TRIBOARD_TC4D7
+    bool
+    select TC4DX_SOC
+    default y
+    depends on TRICORE
+
 config TC27X_SOC
     bool
     select TRICORE_ASCLIN
@@ -20,6 +26,15 @@ config TC27X_SOC
     select TRICORE_SFR
 
 config TC39X_SOC
+    bool
+    select TRICORE_ASCLIN
+    select TRICORE_IRBUS
+    select TRICORE_SCU
+    select TRICORE_STM
+    select TRICORE_VIRT
+    select TRICORE_SFR
+
+config TC4DX_SOC
     bool
     select TRICORE_ASCLIN
     select TRICORE_IRBUS

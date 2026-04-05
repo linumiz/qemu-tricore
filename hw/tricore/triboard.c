@@ -31,6 +31,7 @@
 #include "hw/tricore/triboard.h"
 #include "hw/tricore/tc27xd_soc.h"
 #include "hw/tricore/tc39xb_soc.h"
+#include "hw/tricore/tc4dx_soc.h"
 
 static void tricore_load_kernel(TriCoreCPU *cpu, const char *kernel_filename)
 {
@@ -48,6 +49,28 @@ static void tricore_load_kernel(TriCoreCPU *cpu, const char *kernel_filename)
     }
     env = &cpu->env;
     env->PC = entry;
+}
+
+static void triboard_machine_tc4d7_init(MachineState *machine)
+{
+    TC4DXSoCState *soc;
+
+    soc = TC4DX_SOC(object_new("tc4d7-soc"));
+    sysbus_realize(SYS_BUS_DEVICE(soc), &error_fatal);
+
+    if (machine->kernel_filename) {
+        tricore_load_kernel(&soc->cpu, machine->kernel_filename);
+    }
+}
+
+static void triboard_machine_tc4d7_class_init(ObjectClass *oc,
+                                               const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    mc->init = triboard_machine_tc4d7_init;
+    mc->desc = "Infineon AURIX Kit TC4D7 Lite";
+    mc->default_cpu_type = TRICORE_CPU_TYPE_NAME("tc37x");
 }
 
 
@@ -119,6 +142,11 @@ static const TypeInfo triboard_machine_types[] = {
         .parent         = TYPE_TRIBOARD_MACHINE,
         .class_init     = triboard_machine_tc397b_class_init,
     }, 
+    {
+        .name       = MACHINE_TYPE_NAME("KIT_A3G_TC4D7_LITE"),
+        .parent     = TYPE_MACHINE,
+        .class_init = triboard_machine_tc4d7_class_init,
+    },
 };
 
 DEFINE_TYPES(triboard_machine_types)
