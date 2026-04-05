@@ -20,10 +20,12 @@
 #include "qemu/osdep.h"
 #include "qapi/error.h"
 #include "cpu.h"
+#include "exec/cpu-interrupt.h"
 #include "exec/translation-block.h"
 #include "qemu/error-report.h"
 #include "tcg/debug-assert.h"
 #include "accel/tcg/cpu-ops.h"
+#include "qemu/log.h"
 
 static inline void set_feature(CPUTriCoreState *env, int feature)
 {
@@ -89,6 +91,28 @@ static bool tricore_cpu_has_work(CPUState *cs)
 static int tricore_cpu_mmu_index(CPUState *cs, bool ifetch)
 {
     return 0;
+}
+
+static bool tricore_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
+{
+    TriCoreCPU *cpu = TRICORE_CPU(cs);
+    CPUTriCoreState *env = &cpu->env;
+
+
+    if (env->reset_pending) {
+        qemu_log("tricore_cpu_exec_interrupt RESET\n");
+        cpu_state_reset(env);
+        env->reset_pending = 0;
+        return true;
+    }
+
+    if ((interrupt_request & CPU_INTERRUPT_HARD)
+            && (env->ICR & (MASK_ICR_IE_1_6)) >> 15) {
+        cs->exception_index = EXCP_IRQ;
+        tricore_cpu_do_interrupt(cs);
+        return true;
+    }
+    return false;
 }
 
 static void tricore_cpu_realizefn(DeviceState *dev, Error **errp)
@@ -166,12 +190,6 @@ static void tc37x_initfn(Object *obj)
     set_feature(&cpu->env, TRICORE_FEATURE_162);
 }
 
-static bool tricore_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
-{
-    /* Interrupts are not implemented */
-    return false;
-}
-
 #include "hw/core/sysemu-cpu-ops.h"
 
 static const struct SysemuCPUOps tricore_sysemu_ops = {
@@ -194,6 +212,7 @@ static const TCGCPUOps tricore_tcg_ops = {
     .cpu_exec_interrupt = tricore_cpu_exec_interrupt,
     .cpu_exec_halt = tricore_cpu_has_work,
     .cpu_exec_reset = cpu_reset,
+    .do_interrupt = tricore_cpu_do_interrupt,
 };
 
 static void tricore_cpu_class_init(ObjectClass *c, const void *data)
