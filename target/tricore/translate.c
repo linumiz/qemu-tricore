@@ -3795,7 +3795,13 @@ static void decode_16Bit_opc(DisasContext *ctx)
         break;
     case OPC1_16_SR_JI:
         r1 = MASK_OP_SR_S1D(ctx->opcode);
-        gen_compute_branch(ctx, op1, r1, 0, 0, 0);
+        if (MASK_OP_SR_OP2(ctx->opcode) == 1) {
+            gen_helper_1arg(call, ctx->pc_succ_insn);
+            tcg_gen_andi_i32(cpu_PC, cpu_gpr_a[r1], ~0x1);
+            ctx->base.is_jmp = DISAS_JUMP;
+        } else {
+            gen_compute_branch(ctx, op1, r1, 0, 0, 0);
+        }
         break;
     case OPC1_16_SR_NOT:
         r1 = MASK_OP_SR_S1D(ctx->opcode);
@@ -7980,6 +7986,10 @@ static void decode_sys_interrupts(DisasContext *ctx)
     case OPC2_32_SYS_ISYNC:
         break;
     case OPC2_32_SYS_NOP:
+        break;
+    case OPC2_32_SYS_RFH:
+        gen_helper_rfh(tcg_env);
+        ctx->base.is_jmp = DISAS_EXIT;
         break;
     case OPC2_32_SYS_RET:
         gen_compute_branch(ctx, op2, 0, 0, 0, 0);

@@ -2855,6 +2855,34 @@ void helper_rfe(CPUTriCoreState *env)
     psw_write(env, new_PSW);
 }
 
+void helper_rfh(CPUTriCoreState *env)
+{
+    uint32_t ea;
+    uint32_t new_PCXI;
+    uint32_t new_PSW;
+
+    if ((env->PCXI & 0xfffff) == 0) {
+        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_CSU, GETPC());
+    }
+    if (pcxi_get_ul(env) == 0) {
+        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_CTYP, GETPC());
+    }
+
+    env->PC = env->gpr_a[11] & ~0x1;
+
+    ea = (pcxi_get_pcxs(env) << 28) |
+         (pcxi_get_pcxo(env) << 6);
+
+    restore_context_upper(env, ea, &new_PCXI, &new_PSW);
+
+    cpu_stl_le_data(env, ea, env->FCX);
+    env->FCX = (env->FCX & 0xfff00000) + (env->PCXI & 0x000fffff);
+    env->PCXI = new_PCXI;
+    psw_write(env, new_PSW);
+    icr_set_ie(env, 0);
+    icr_set_ccpn(env, 0);
+}
+
 void helper_rfm(CPUTriCoreState *env)
 {
     env->PC = (env->gpr_a[11] & ~0x1);

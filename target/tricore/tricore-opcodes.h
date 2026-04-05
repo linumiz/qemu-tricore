@@ -1482,6 +1482,7 @@ enum {
     OPC2_32_SYS_SVLCX                            = 0x08,
     OPC2_32_SYS_TRAPSV                           = 0x15,
     OPC2_32_SYS_TRAPV                            = 0x14,
+    OPC2_32_SYS_RFH                              = 0x17,
     OPC2_32_SYS_RESTORE                          = 0x0e,
     OPC2_32_SYS_FRET                             = 0x03,
 };
