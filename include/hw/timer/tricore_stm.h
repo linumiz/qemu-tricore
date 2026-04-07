@@ -15,6 +15,7 @@
 #include "qemu/main-loop.h"
 #include "hw/core/sysbus.h"
 #include "hw/core/ptimer.h"
+#include "qemu/timer.h"
 #include "hw/tricore/tricore_scu.h"
 
 
@@ -75,7 +76,7 @@ typedef struct {
     SysBusDevice parent_obj;
     char cmp0_irq_pending;
     QEMUBH *bh;                /* workaround TODO move to dedicated device */
-    ptimer_state *ptimer;    /* workaround TODO move to dedicated device */
+    QEMUTimer *timer;
 
     /* <public> */
     MemoryRegion iomem;
@@ -91,7 +92,9 @@ typedef struct {
     qemu_irq irq;
     uint32_t freq_hz;
     uint64_t tim_counter;
+    //uint64_t counter_offset;
     bool tc4x_mode;
+    int64_t realtime_base_ns;
 } TriCoreSTMState;
 
 #endif

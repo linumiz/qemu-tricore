@@ -86,6 +86,7 @@ static void tricore_cpu_reset_hold(Object *obj, ResetType type)
 static bool tricore_cpu_has_work(CPUState *cs)
 {
     return true;
+    //return cs->interrupt_request & CPU_INTERRUPT_HARD;
 }
 
 static int tricore_cpu_mmu_index(CPUState *cs, bool ifetch)

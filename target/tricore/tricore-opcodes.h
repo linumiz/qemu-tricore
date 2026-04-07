@@ -1474,6 +1474,7 @@ enum {
     OPC2_32_SYS_DSYNC                            = 0x12,
     OPC2_32_SYS_ENABLE                           = 0x0c,
     OPC2_32_SYS_ISYNC                            = 0x13,
+    OPC2_32_SYS_WAIT                             = 0x16,
     OPC2_32_SYS_NOP                              = 0x00,
     OPC2_32_SYS_RET                              = 0x06,
     OPC2_32_SYS_RFE                              = 0x07,

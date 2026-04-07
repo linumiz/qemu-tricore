@@ -55,7 +55,7 @@ const MemmapEntry tc4dx_soc_memmap[] = {
     [TC4DX_STM]        = { 0xF8800000,                  0x0 },
     [TC4DX_ASCLIN]     = { 0xF46C0000,                  0x0 },
     [TC4DX_SCU]        = { 0xF0064000,                  0x0 },
-    [TC4DX_IRBUS]      = { 0xF4430000,                  0x0 },
+    [TC4DX_IRBUS]      = { 0xF4432000,                  0x0 },
 };
 
 static void make_ram(MemoryRegion *mr, const char *name,
@@ -151,6 +151,7 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
     object_property_add_const_link(OBJECT(s->stm), "scu", OBJECT(s->scu));
     qdev_prop_set_chr(DEVICE(s->asclin), "chardev", serial_hd(0));
     qdev_prop_set_bit(DEVICE(s->stm), "tc4x-mode", true);
+    qdev_prop_set_bit(DEVICE(s->irbus), "tc4x-mode", true);
 
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->sfr), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->scu), &error_fatal);
@@ -172,6 +173,7 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
 
     memory_region_add_subregion_overlap(sysmem, sc->memmap[TC4DX_SFR].base, &s->sfr->iomem, -1);
     memory_region_add_subregion_overlap(sysmem, sc->memmap[TC4DX_IRBUS].base, &s->irbus->srvcontrolregs, 0);
+    memory_region_add_subregion_overlap(sysmem, 0xF4430000, &s->irbus->intregs, 0);  /* IR INT regs (LWSR) */
     memory_region_add_subregion_overlap(sysmem, sc->memmap[TC4DX_ASCLIN].base, &s->asclin->iomem, 1);
     memory_region_add_subregion_overlap(sysmem, sc->memmap[TC4DX_VIRT].base, &s->virt->iomem, 1);
     memory_region_add_subregion_overlap(sysmem, sc->memmap[TC4DX_SCU].base, &s->scu->iomem, 1);

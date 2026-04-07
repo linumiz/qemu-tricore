@@ -7987,6 +7987,11 @@ static void decode_sys_interrupts(DisasContext *ctx)
         break;
     case OPC2_32_SYS_NOP:
         break;
+    case OPC2_32_SYS_WAIT:
+        tcg_gen_movi_tl(cpu_PC, ctx->base.pc_next);
+        gen_helper_wait(tcg_env);
+        ctx->base.is_jmp = DISAS_NORETURN;
+        break;
     case OPC2_32_SYS_RFH:
         gen_helper_rfh(tcg_env);
         ctx->base.is_jmp = DISAS_EXIT;

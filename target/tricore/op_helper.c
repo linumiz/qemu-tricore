@@ -18,6 +18,7 @@
 #include "cpu.h"
 #include "qemu/log.h"
 #include "qemu/host-utils.h"
+#include "exec/cpu-interrupt.h"
 #include "exec/helper-proto.h"
 #include "accel/tcg/cpu-ldst.h"
 #include "qemu/plugin.h"
@@ -2882,6 +2883,28 @@ void helper_rfh(CPUTriCoreState *env)
     icr_set_ie(env, 0);
     icr_set_ccpn(env, 0);
 }
+
+#if 1
+void helper_wait(CPUTriCoreState *env)
+{
+    cpu_loop_exit(env_cpu(env));
+}
+
+#else
+void helper_wait(CPUTriCoreState *env)
+{
+    CPUState *cs = env_cpu(env);
+
+    if (cs->interrupt_request & CPU_INTERRUPT_HARD) {
+        return;
+    }
+
+    //error_report("WAIT: halting CPU");
+    cs->halted = 1;
+    cs->exception_index = EXCP_HLT;
+    cpu_loop_exit(cs);
+}
+#endif
 
 void helper_rfm(CPUTriCoreState *env)
 {

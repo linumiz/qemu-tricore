@@ -410,7 +410,7 @@ static void uart_write(void *opaque, hwaddr offset, uint64_t value,
         break;
     default:
         error_report("asclin_uart: write access to unknown register 0x"
-        HWADDR_FMT_plx, reg_addr << 2);
+                      HWADDR_FMT_plx, reg_addr << 2);
         break;
     }
     uart_update_irq(s);
