@@ -125,7 +125,7 @@ const MemmapEntry tc39xb_soc_memmap[] = {
     [TC39XB_STM]       = { 0xF0001000,                  0x0 },
     [TC39XB_ASCLIN]    = { 0xF0000600,                  0x0 },
     [TC39XB_SCU]       = { 0xF0036000,                  0x0 },
-    [TC39XB_IRBUS]     = { 0xF0037000,                  0x0 },
+    [TC39XB_IRBUS]     = { 0xF0038000,                  0x0 },
 };
 
 /*
@@ -327,12 +327,20 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_connect_irq(SYS_BUS_DEVICE(s->scu), 0, s->irq[IR_SRC_RESET]);
 
     /* finally map memory regions */
-    memory_region_add_subregion(sysmem, sc->memmap[TC39XB_SFR].base, &s->sfr->iomem);
-    memory_region_add_subregion(sysmem, sc->memmap[TC39XB_IRBUS].base, &s->irbus->srvcontrolregs);
-    memory_region_add_subregion(sysmem, sc->memmap[TC39XB_ASCLIN].base, &s->asclin->iomem);
-    memory_region_add_subregion(sysmem, sc->memmap[TC39XB_VIRT].base, &s->virt->iomem);
-    memory_region_add_subregion(sysmem, sc->memmap[TC39XB_SCU].base, &s->scu->iomem);
-    memory_region_add_subregion(sysmem, sc->memmap[TC39XB_STM].base, &s->stm->iomem);
+    memory_region_add_subregion_overlap(sysmem, sc->memmap[TC39XB_SFR].base,
+                                        &s->sfr->iomem, -1);
+    memory_region_add_subregion_overlap(sysmem, sc->memmap[TC39XB_IRBUS].base,
+                                        &s->irbus->srvcontrolregs, 0);
+    memory_region_add_subregion_overlap(sysmem, 0xF0037000,
+                                        &s->irbus->intregs, 0);
+    memory_region_add_subregion_overlap(sysmem, sc->memmap[TC39XB_ASCLIN].base,
+                                        &s->asclin->iomem, 1);
+    memory_region_add_subregion_overlap(sysmem, sc->memmap[TC39XB_VIRT].base,
+                                        &s->virt->iomem, 1);
+    memory_region_add_subregion_overlap(sysmem, sc->memmap[TC39XB_SCU].base,
+                                        &s->scu->iomem, 1);
+    memory_region_add_subregion_overlap(sysmem, sc->memmap[TC39XB_STM].base,
+                                        &s->stm->iomem, 1);
 }
 
 static void tc39x_soc_init(Object *obj)

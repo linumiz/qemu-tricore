@@ -141,6 +141,7 @@ static void tricore_stm_timer_start(TriCoreSTMState *s)
 }
 #endif
 
+#if 0
 static void tricore_stm_timer_start(TriCoreSTMState *s)
 {
     timer_del(s->timer);
@@ -171,6 +172,135 @@ static void tricore_stm_timer_start(TriCoreSTMState *s)
                                   NANOSECONDS_PER_SECOND, s->freq_hz);
     int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
  
+    timer_mod(s->timer, now + timeout_ns);
+}
+
+static void tricore_stm_timer_start(TriCoreSTMState *s)
+{
+    timer_del(s->timer);
+
+    if (s->regs[CMP0] == 0) {
+        return;
+    }
+
+    uint32_t mstart = (s->regs[CMCON] & MASK_CMCON_MSTART0) >> 8;
+    uint32_t msize  = (s->regs[CMCON] & MASK_CMCON_MSIZE0);
+    uint32_t nbits  = msize + 1;
+    uint32_t mask   = (nbits >= 32) ? 0xFFFFFFFFu : ((1u << nbits) - 1);
+
+    tricore_stm_get_tim_update_regs(s, 0, 0);
+
+    uint32_t window_val = (uint32_t)(s->tim_counter >> mstart) & mask;
+    uint32_t target = s->regs[CMP0] & mask;
+
+    uint32_t delta;
+#if 0
+    if (target > window_val) {
+        delta = target - window_val;
+    } else {
+        delta = (mask - window_val) + 1 + target;
+        /* Counter already passed the target. If the wrap-around delta
+         * exceeds half the compare window, the target was just missed
+         * rather than being far in the future. Fire immediately. */
+        if (delta > (mask >> 1)) {
+            delta = 1;
+        }
+    }
+#endif
+
+    if (target > window_val) {
+        delta = target - window_val;
+    } else {
+        delta = (mask - window_val) + 1 + target;
+    }
+
+    uint64_t timeout_ticks = (uint64_t)delta << mstart;
+    int64_t timeout_ns = muldiv64(timeout_ticks,
+                                  NANOSECONDS_PER_SECOND, s->freq_hz);
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+
+#if 1
+    error_report("STM timer_start: CMP0=0x%x counter=0x%x delta=0x%x "
+                 "timeout_ms=%ld freq=%u",
+                 target, window_val, delta,
+                 (long)(timeout_ns / 1000000), s->freq_hz);
+#endif
+
+    timer_mod(s->timer, now + timeout_ns);
+}
+
+static void tricore_stm_timer_start(TriCoreSTMState *s)
+{
+    timer_del(s->timer);
+
+    if (s->regs[CMP0] == 0) {
+        return;
+    }
+
+    uint32_t mstart = (s->regs[CMCON] & MASK_CMCON_MSTART0) >> 8;
+    uint32_t msize  = (s->regs[CMCON] & MASK_CMCON_MSIZE0);
+    uint32_t nbits  = msize + 1;
+    uint32_t mask   = (nbits >= 32) ? 0xFFFFFFFFu : ((1u << nbits) - 1);
+
+    tricore_stm_get_tim_update_regs(s, 0, 0);
+
+    uint32_t window_val = (uint32_t)(s->tim_counter >> mstart) & mask;
+    uint32_t target = s->regs[CMP0] & mask;
+
+    uint32_t delta;
+    if (target > window_val) {
+        delta = target - window_val;
+    } else {
+        delta = (mask - window_val) + 1 + target;
+    }
+
+    uint64_t timeout_ticks = (uint64_t)delta << mstart;
+    int64_t timeout_ns = muldiv64(timeout_ticks,
+                                  NANOSECONDS_PER_SECOND, s->freq_hz);
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+
+    timer_mod(s->timer, now + timeout_ns);
+}
+#endif
+
+static void tricore_stm_timer_start(TriCoreSTMState *s)
+{
+    timer_del(s->timer);
+
+    if (s->regs[CMP0] == 0) {
+        //error_report("STM timer_start: CMP0=0, skip");
+        return;
+    }
+
+    uint32_t mstart = (s->regs[CMCON] & MASK_CMCON_MSTART0) >> 8;
+    uint32_t msize  = (s->regs[CMCON] & MASK_CMCON_MSIZE0);
+    uint32_t nbits  = msize + 1;
+    uint32_t mask   = (nbits >= 32) ? 0xFFFFFFFFu : ((1u << nbits) - 1);
+
+    tricore_stm_get_tim_update_regs(s, 0, 0);
+
+    uint32_t window_val = (uint32_t)(s->tim_counter >> mstart) & mask;
+    uint32_t target = s->regs[CMP0] & mask;
+
+    uint32_t delta;
+    if (target > window_val) {
+        delta = target - window_val;
+    } else {
+        delta = (mask - window_val) + 1 + target;
+    }
+
+    uint64_t timeout_ticks = (uint64_t)delta << mstart;
+    int64_t timeout_ns = muldiv64(timeout_ticks,
+                                  NANOSECONDS_PER_SECOND, s->freq_hz);
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+
+#if 0
+    error_report("STM timer_start: CMP0=0x%x counter=0x%x delta=0x%x "
+                 "timeout_ms=%ld freq=%u ICR=0x%x",
+                 target, window_val, delta,
+                 (long)(timeout_ns / 1000000), s->freq_hz, s->regs[ICR]);
+#endif
+
     timer_mod(s->timer, now + timeout_ns);
 }
 
@@ -220,6 +350,10 @@ static void tricore_stm_write(void *opaque, hwaddr offset, uint64_t value,
          break;
     case CMP1:
     case ICR:
+#if 0
+         error_report("STM ICR write: val=0x%lx CMP0EN=%d",
+                      (unsigned long)value, !!(value & MASK_ICR_CMP0EN));
+#endif
          s->regs[reg_addr] = value;
          break;
     case TIM0SV:
@@ -255,6 +389,11 @@ static void tricore_stm_write(void *opaque, hwaddr offset, uint64_t value,
             qatomic_or(&s->regs[ICR], MASK_ICR_CMP1IR);
         }
         tricore_stm_update_irqs(opaque);
+
+#if 0
+        error_report("STM ISCR write: val=0x%lx ICR_after=0x%x",
+                     (unsigned long)value, s->regs[ICR]);
+#endif
         break;
     default:
         break;
@@ -361,10 +500,16 @@ static uint64_t tricore_stm_read(void *opaque, hwaddr offset, unsigned size)
         r = s->regs[reg_addr];
         break;
     case TIM0SV:
+        r = tricore_stm_get_tim_update_regs(s, 0, 0);
+#if 0
         r = 0x0;
         s->regs[CAP] = (uint32_t) (s->tim_counter >> 32);
+#endif
         break;
     case CAPSV:
+        tricore_stm_get_tim_update_regs(s, 0, 0);
+        r = (uint32_t)(s->tim_counter >> 32);
+        break;
     case OCS:
     case KRSTCLR:
     case KRST1:
@@ -440,12 +585,103 @@ static void tricore_stm_timer_hit(void *opaque)
     qatomic_or(&s->regs[ICR], MASK_ICR_CMP0IR);
     tricore_stm_update_irqs(opaque);
 }
-#endif
 
 static void tricore_stm_timer_hit(void *opaque)
 {
     TriCoreSTMState *s = (TriCoreSTMState *) opaque;
 //    error_report("STM timer_hit fired");
+    qatomic_or(&s->regs[ICR], MASK_ICR_CMP0IR);
+    tricore_stm_update_irqs(opaque);
+}
+
+static void tricore_stm_timer_hit(void *opaque)
+{
+    TriCoreSTMState *s = (TriCoreSTMState *) opaque;
+
+    if (!(s->regs[ICR] & MASK_ICR_CMP0EN)) {
+        return;
+    }
+
+    qatomic_or(&s->regs[ICR], MASK_ICR_CMP0IR);
+    tricore_stm_update_irqs(opaque);
+}
+
+static void tricore_stm_timer_hit(void *opaque)
+{
+    TriCoreSTMState *s = (TriCoreSTMState *) opaque;
+
+    if (!(s->regs[ICR] & MASK_ICR_CMP0EN)) {
+        return;
+    }
+
+    /* Rebase so ISR sees counter at match point, not wall-clock now */
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    s->realtime_base_ns = now;
+    s->tim_counter = (uint64_t)s->regs[CMP0];
+
+    qatomic_or(&s->regs[ICR], MASK_ICR_CMP0IR);
+    tricore_stm_update_irqs(opaque);
+}
+
+static void tricore_stm_timer_hit(void *opaque)
+{
+    TriCoreSTMState *s = (TriCoreSTMState *) opaque;
+
+    if (!(s->regs[ICR] & MASK_ICR_CMP0EN)) {
+        return;
+    }
+
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    s->realtime_base_ns = now - muldiv64((uint64_t)s->regs[CMP0],
+                                          NANOSECONDS_PER_SECOND,
+                                          s->freq_hz);
+
+    qatomic_or(&s->regs[ICR], MASK_ICR_CMP0IR);
+    tricore_stm_update_irqs(opaque);
+}
+
+static void tricore_stm_timer_hit(void *opaque)
+{
+    TriCoreSTMState *s = (TriCoreSTMState *) opaque;
+
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    s->realtime_base_ns = now - muldiv64((uint64_t)s->regs[CMP0],
+                                          NANOSECONDS_PER_SECOND,
+                                          s->freq_hz);
+
+    qatomic_or(&s->regs[ICR], MASK_ICR_CMP0IR);
+    tricore_stm_update_irqs(opaque);
+}
+
+static void tricore_stm_timer_hit(void *opaque)
+{
+    TriCoreSTMState *s = (TriCoreSTMState *) opaque;
+
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    s->realtime_base_ns = now - muldiv64((uint64_t)s->regs[CMP0],
+                                          NANOSECONDS_PER_SECOND,
+                                          s->freq_hz);
+
+    qatomic_or(&s->regs[ICR], MASK_ICR_CMP0IR);
+    tricore_stm_update_irqs(opaque);
+}
+#endif
+
+static void tricore_stm_timer_hit(void *opaque)
+{
+    TriCoreSTMState *s = (TriCoreSTMState *) opaque;
+
+#if 0
+    error_report("STM timer_hit: CMP0=0x%x ICR=0x%x CMP0EN=%d",
+                 s->regs[CMP0], s->regs[ICR],
+                 !!(s->regs[ICR] & MASK_ICR_CMP0EN));
+#endif
+
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    s->realtime_base_ns = now - muldiv64((uint64_t)s->regs[CMP0],
+                                          NANOSECONDS_PER_SECOND,
+                                          s->freq_hz);
+
     qatomic_or(&s->regs[ICR], MASK_ICR_CMP0IR);
     tricore_stm_update_irqs(opaque);
 }

@@ -69,16 +69,60 @@ static const char *get_name_by_src(int srcnum)
     }
 }
 
-static int reg_addr_to_srcnum(hwaddr reg_addr)
+static int reg_addr_to_srcnum(bool tc4x_mode, hwaddr reg_addr)
 {
+    if (tc4x_mode) {
+        switch (reg_addr) {
+        /* SRC_STMCPUwSRx: offset 0x020 + w*0x40 + x*4
+         * reg_addr = offset / 4 */
+        case 0x8 ... 0x17:
+            return IR_SRC_STM0_SR0;
+        case 0x18 ... 0x1F:
+            return IR_SRC_STM1_SR0;
+        case 0x28 ... 0x37:
+            return IR_SRC_STM2_SR0;
+        /* SRC_ASCLINwTX: offset 0x2B0 + w*12 */
+        case 0xAC:
+            return IR_SRC_ASCLIN0TX;
+        case 0xAD:
+            return IR_SRC_ASCLIN0RX;
+        case 0xAE:
+            return IR_SRC_ASCLIN0EX;
+        default:
+            return -1;
+        }
+    }
+
+    /* TC2x/TC3x */
     switch (reg_addr) {
-    /* TC2x/TC3x: IRBUS base = SRC base (e.g. 0xF0038000) */
+    /* TC39XB: ASCLIN0 TX/RX/ERR (IRQ 20/21/22) */
+    case 0x14:
+        return IR_SRC_ASCLIN0TX;
+    case 0x15:
+        return IR_SRC_ASCLIN0RX;
+    case 0x16:
+        return IR_SRC_ASCLIN0EX;
+    /* TC27XD: ASCLIN0 TX/RX/ERR at SRC IDX 0x20/0x21/0x22 */
     case 0x20:
         return IR_SRC_ASCLIN0TX;
     case 0x21:
         return IR_SRC_ASCLIN0RX;
     case 0x22:
         return IR_SRC_ASCLIN0EX;
+    /* TC39XB: STM0-STM2 (IRQ 192-197) */
+    case 0xC0:
+        return IR_SRC_STM0_SR0;
+    case 0xC1:
+        return IR_SRC_STM0_SR1;
+    case 0xC2:
+        return IR_SRC_STM1_SR0;
+    case 0xC3:
+        return IR_SRC_STM1_SR1;
+    case 0xC4:
+        return IR_SRC_STM2_SR0;
+    case 0xC5:
+        return IR_SRC_STM2_SR1;
+    /* TC27XD: STM at SRC IDX 0x124-0x129 */
     case 0x124:
         return IR_SRC_STM0_SR0;
     case 0x125:
@@ -91,61 +135,26 @@ static int reg_addr_to_srcnum(hwaddr reg_addr)
         return IR_SRC_STM2_SR0;
     case 0x129:
         return IR_SRC_STM2_SR1;
-
-    /* TC4x: IRBUS base = SRC base 0xF4432000
-     * SRC_STMCPUwSRx: offset 0x020 + w*0x40 + x*4 */
-    case 0x8:
-    case 0x9:
-    case 0xA:
-    case 0xB:
-    case 0xC:
-    case 0xD:
-    case 0xE:
-    case 0xF:
-    case 0x10:
-    case 0x11:
-    case 0x12:
-    case 0x13:
-    case 0x14:
-    case 0x15:
-    case 0x16:
-    case 0x17:
-        return IR_SRC_STM0_SR0;
-    case 0x18:
-    case 0x19:
-    case 0x1A:
-    case 0x1B:
-    case 0x1C:
-    case 0x1D:
-    case 0x1E:
-    case 0x1F:
-        return IR_SRC_STM1_SR0;
-    /* 0x20-0x27 (TC4x CPU1 SR8-SR15) skipped: overlaps TC3x ASCLIN */
-    case 0x28:
-    case 0x29:
-    case 0x2A:
-    case 0x2B:
-    case 0x2C:
-    case 0x2D:
-    case 0x2E:
-    case 0x2F:
+    /* TC39XB: STM0 SR0/SR1 at SRC offset 0x0C0/0x0C4 -> IDX 0x30/0x31 */
     case 0x30:
+        return IR_SRC_STM0_SR0;
     case 0x31:
+        return IR_SRC_STM0_SR1;
     case 0x32:
+        return IR_SRC_STM1_SR0;
     case 0x33:
+        return IR_SRC_STM1_SR1;
     case 0x34:
-    case 0x35:
-    case 0x36:
-    case 0x37:
         return IR_SRC_STM2_SR0;
-    /* SRC_ASCLINwTX: offset 0x2B0 + w*12 */
-    case 0xAC:
+    case 0x35:
+        return IR_SRC_STM2_SR1;
+    /* TC39XB: ASCLIN0 TX/RX/ERR at SRC offset 0x200/0x204/0x208 -> IDX 0x80/0x81/0x82 */
+    case 0x80:
         return IR_SRC_ASCLIN0TX;
-    case 0xAD:
+    case 0x81:
         return IR_SRC_ASCLIN0RX;
-    case 0xAE:
+    case 0x82:
         return IR_SRC_ASCLIN0EX;
-
     default:
         return -1;
     }
@@ -172,31 +181,38 @@ static void irq_evaluate(void *opaque)
                 srcnum, get_name_by_src(srcnum), (src_reg & IR_SRC_SRPN));
             }
 
-            /* auto-clear SRR on delivery */
-            src_reg &= ~srr_mask;
-            pv->src_control_reg[srcnum] = src_reg;
+            /*
+             * Do NOT auto-clear SRR here. On real HW, SRR is cleared
+             * on ISP acknowledge. In QEMU level-triggered model, SRR
+             * is cleared when the peripheral deasserts (irq_handler
+             * level=0). Clearing here causes a race: any subsequent
+             * irq_evaluate call from another SRC finds nothing pending
+             * and lowers parent_irq before the CPU takes the interrupt.
+             */
 
             env->ICR = (env->ICR & (~MASK_ICR_PIPN)) |
                 ((src_reg & IR_SRC_SRPN) << 16);
 
-            /* TC4x: update LWSR for the VM so intc driver can read SRC index */
             if (pv->tc4x_mode) {
                 uint32_t vm = (src_reg & IR_SRC_VM_MASK) >> IR_SRC_VM_SHIFT;
                 uint32_t src_idx = pv->src_regaddr[srcnum];
-                pv->lwsr[vm] = (1u << 31)          /* STAT */
-                             | ((uint32_t)src_idx << 16)  /* ID */
-                             | (1u << 12)           /* VALID */
-                             | (src_reg & IR_SRC_SRPN);   /* PN */
+                pv->lwsr[vm] = (1u << 31)
+                             | ((uint32_t)src_idx << 16)
+                             | (1u << 12)
+                             | (src_reg & IR_SRC_SRPN);
                 pv->lasr = pv->lwsr[vm];
+            } else {
+                pv->lasr = (1u << 31)
+                         | ((uint32_t)pv->src_regaddr[srcnum] << 16)
+                         | (src_reg & IR_SRC_SRPN);
             }
 
             qemu_irq_raise(pv->parent_irq);
             return;
         }
     }
-    /* no pending interrupt found - clear PIPN and lower IRQ */
+
     env->ICR &= ~MASK_ICR_PIPN;
-    qemu_irq_lower(pv->parent_irq);
 
     if (qemu_loglevel_mask(CPU_LOG_INT)) {
         qemu_log("tricore_irbus: lower irq line\n");
@@ -233,7 +249,7 @@ static uint64_t tricore_irbus_srvcontrolregs_read(void *opaque, hwaddr offset,
 {
     TriCoreIRBUSState *s = (TriCoreIRBUSState *) opaque;
     hwaddr reg_addr = offset >> 2;
-    int srcnum = reg_addr_to_srcnum(reg_addr);
+    int srcnum = reg_addr_to_srcnum(s->tc4x_mode, reg_addr);
 
     if (srcnum >= 0) {
         return s->src_control_reg[srcnum];
@@ -247,7 +263,7 @@ static void tricore_irbus_srvcontrolregs_write(void *opaque, hwaddr offset,
 {
     TriCoreIRBUSState *s = (TriCoreIRBUSState *) opaque;
     hwaddr reg_addr = offset >> 2;
-    int srcnum = reg_addr_to_srcnum(reg_addr);
+    int srcnum = reg_addr_to_srcnum(s->tc4x_mode, reg_addr);
 
     if (srcnum < 0) {
         if (qemu_loglevel_mask(CPU_LOG_INT)) {
@@ -317,6 +333,11 @@ static uint64_t tricore_irbus_intregs_read(void *opaque, hwaddr offset,
 
     if (offset == IR_INT_ID_OFF) {
         return IR_INT_MOD_ID;
+    }
+
+    /* TC3x LASR: 0x200 + ICU*0x10 + 0x04 */
+    if (!s->tc4x_mode && offset >= 0x200 && offset < 0x280) {
+        return s->lasr;
     }
 
     /* LWSR: 0x0C00 + z*0x34 + y*4 */
