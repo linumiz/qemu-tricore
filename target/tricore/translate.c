@@ -6278,23 +6278,82 @@ static void decode_rr_divide(DisasContext *ctx)
         }
         break;
     case OPC2_32_RR_DIV:
-        if (has_feature(ctx, TRICORE_FEATURE_16)) {
+    {
+        int n = (ctx->opcode >> 16) & 0x3;
+        if (n == 1 && has_feature(ctx, TRICORE_FEATURE_16)) {
+            /* DIV E[c], D[a], D[b] - 32-bit */
             CHECK_REG_PAIR(r3);
-            GEN_HELPER_RR(divide, cpu_gpr_d[r3], cpu_gpr_d[r3 + 1], cpu_gpr_d[r1],
-                          cpu_gpr_d[r2]);
+            GEN_HELPER_RR(divide, cpu_gpr_d[r3], cpu_gpr_d[r3 + 1],
+                          cpu_gpr_d[r1], cpu_gpr_d[r2]);
+        } else if (n == 2 && has_feature(ctx, TRICORE_FEATURE_16)) {
+            /* DIV64 E[c], E[a], E[b] - 64-bit, TC1.8 */
+            CHECK_REG_PAIR(r1);
+            CHECK_REG_PAIR(r2);
+            CHECK_REG_PAIR(r3);
+            TCGv_i64 t1 = tcg_temp_new_i64();
+            TCGv_i64 t2 = tcg_temp_new_i64();
+            TCGv_i64 res = tcg_temp_new_i64();
+            tcg_gen_concat_i32_i64(t1, cpu_gpr_d[r1], cpu_gpr_d[r1 + 1]);
+            tcg_gen_concat_i32_i64(t2, cpu_gpr_d[r2], cpu_gpr_d[r2 + 1]);
+            gen_helper_divide64(res, tcg_env, t1, t2);
+            tcg_gen_extr_i64_i32(cpu_gpr_d[r3], cpu_gpr_d[r3 + 1], res);
         } else {
             generate_trap(ctx, TRAPC_INSN_ERR, TIN2_IOPC);
         }
         break;
+    }
     case OPC2_32_RR_DIV_U:
-        if (has_feature(ctx, TRICORE_FEATURE_16)) {
+    {
+        int n = (ctx->opcode >> 16) & 0x3;
+        if (n == 1 && has_feature(ctx, TRICORE_FEATURE_16)) {
             CHECK_REG_PAIR(r3);
             GEN_HELPER_RR(divide_u, cpu_gpr_d[r3], cpu_gpr_d[r3 + 1],
                           cpu_gpr_d[r1], cpu_gpr_d[r2]);
+        } else if (n == 2 && has_feature(ctx, TRICORE_FEATURE_16)) {
+            /* DIV64.U */
+            CHECK_REG_PAIR(r1);
+            CHECK_REG_PAIR(r2);
+            CHECK_REG_PAIR(r3);
+            TCGv_i64 t1 = tcg_temp_new_i64();
+            TCGv_i64 t2 = tcg_temp_new_i64();
+            TCGv_i64 res = tcg_temp_new_i64();
+            tcg_gen_concat_i32_i64(t1, cpu_gpr_d[r1], cpu_gpr_d[r1 + 1]);
+            tcg_gen_concat_i32_i64(t2, cpu_gpr_d[r2], cpu_gpr_d[r2 + 1]);
+            gen_helper_divide64_u(res, tcg_env, t1, t2);
+            tcg_gen_extr_i64_i32(cpu_gpr_d[r3], cpu_gpr_d[r3 + 1], res);
         } else {
             generate_trap(ctx, TRAPC_INSN_ERR, TIN2_IOPC);
         }
         break;
+    }
+    case OPC2_32_RR_REM64:
+    {
+        CHECK_REG_PAIR(r1);
+        CHECK_REG_PAIR(r2);
+        CHECK_REG_PAIR(r3);
+        TCGv_i64 t1 = tcg_temp_new_i64();
+        TCGv_i64 t2 = tcg_temp_new_i64();
+        TCGv_i64 res = tcg_temp_new_i64();
+        tcg_gen_concat_i32_i64(t1, cpu_gpr_d[r1], cpu_gpr_d[r1 + 1]);
+        tcg_gen_concat_i32_i64(t2, cpu_gpr_d[r2], cpu_gpr_d[r2 + 1]);
+        gen_helper_remainder64(res, tcg_env, t1, t2);
+        tcg_gen_extr_i64_i32(cpu_gpr_d[r3], cpu_gpr_d[r3 + 1], res);
+        break;
+    }
+    case OPC2_32_RR_REM64_U:
+    {
+        CHECK_REG_PAIR(r1);
+        CHECK_REG_PAIR(r2);
+        CHECK_REG_PAIR(r3);
+        TCGv_i64 t1 = tcg_temp_new_i64();
+        TCGv_i64 t2 = tcg_temp_new_i64();
+        TCGv_i64 res = tcg_temp_new_i64();
+        tcg_gen_concat_i32_i64(t1, cpu_gpr_d[r1], cpu_gpr_d[r1 + 1]);
+        tcg_gen_concat_i32_i64(t2, cpu_gpr_d[r2], cpu_gpr_d[r2 + 1]);
+        gen_helper_remainder64_u(res, tcg_env, t1, t2);
+        tcg_gen_extr_i64_i32(cpu_gpr_d[r3], cpu_gpr_d[r3 + 1], res);
+        break;
+    }
     case OPC2_32_RR_MUL_F:
         gen_helper_fmul(cpu_gpr_d[r3], tcg_env, cpu_gpr_d[r1], cpu_gpr_d[r2]);
         break;

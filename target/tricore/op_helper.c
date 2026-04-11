@@ -2207,6 +2207,82 @@ uint64_t helper_divide_u(CPUTriCoreState *env, uint32_t r1, uint32_t r2)
     return ((uint64_t)remainder << 32) | quotient;
 }
 
+uint64_t helper_remainder64_u(CPUTriCoreState *env, uint64_t r1, uint64_t r2)
+{
+    uint64_t remainder;
+
+    if (r2 == 0) {
+        remainder = 0;
+        env->PSW_USB_V = (1u << 31);
+        env->PSW_USB_SV |= env->PSW_USB_V;
+    } else {
+        remainder = r1 % r2;
+        env->PSW_USB_V = 0;
+    }
+    env->PSW_USB_AV = 0;
+    return remainder;
+}
+
+uint64_t helper_remainder64(CPUTriCoreState *env, uint64_t r1, uint64_t r2)
+{
+    int64_t dividend = (int64_t)r1;
+    int64_t divisor = (int64_t)r2;
+    uint64_t remainder;
+
+    if (divisor == 0) {
+        remainder = 0;
+        env->PSW_USB_V = (1u << 31);
+        env->PSW_USB_SV |= env->PSW_USB_V;
+    } else if (divisor == -1 && dividend == INT64_MIN) {
+        remainder = 0;
+        env->PSW_USB_V = (1u << 31);
+        env->PSW_USB_SV |= env->PSW_USB_V;
+    } else {
+        remainder = (uint64_t)(dividend % divisor);
+        env->PSW_USB_V = 0;
+    }
+    env->PSW_USB_AV = 0;
+    return remainder;
+}
+
+uint64_t helper_divide64(CPUTriCoreState *env, uint64_t r1, uint64_t r2)
+{
+    int64_t dividend = (int64_t)r1;
+    int64_t divisor = (int64_t)r2;
+    int64_t quotient;
+
+    if (divisor == 0) {
+        quotient = (dividend >= 0) ? INT64_MAX : INT64_MIN;
+        env->PSW_USB_V = (1u << 31);
+        env->PSW_USB_SV |= env->PSW_USB_V;
+    } else if (divisor == -1 && dividend == INT64_MIN) {
+        quotient = INT64_MAX;
+        env->PSW_USB_V = (1u << 31);
+        env->PSW_USB_SV |= env->PSW_USB_V;
+    } else {
+        quotient = dividend / divisor;
+        env->PSW_USB_V = 0;
+    }
+    env->PSW_USB_AV = 0;
+    return (uint64_t)quotient;
+}
+
+uint64_t helper_divide64_u(CPUTriCoreState *env, uint64_t r1, uint64_t r2)
+{
+    uint64_t quotient;
+
+    if (r2 == 0) {
+        quotient = UINT64_MAX;
+        env->PSW_USB_V = (1u << 31);
+        env->PSW_USB_SV |= env->PSW_USB_V;
+    } else {
+        quotient = r1 / r2;
+        env->PSW_USB_V = 0;
+    }
+    env->PSW_USB_AV = 0;
+    return quotient;
+}
+
 uint64_t helper_mul_h(uint32_t arg00, uint32_t arg01,
                       uint32_t arg10, uint32_t arg11, uint32_t n)
 {

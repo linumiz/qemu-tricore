@@ -1146,6 +1146,8 @@ enum {
     OPC2_32_RR_POPCNT_W                          = 0x22, /* 1.6.2 only */
     OPC2_32_RR_DIV                               = 0x20,
     OPC2_32_RR_DIV_U                             = 0x21,
+    OPC2_32_RR_REM64                             = 0x34,
+    OPC2_32_RR_REM64_U                           = 0x35,
     OPC2_32_RR_MUL_F                             = 0x04,
     OPC2_32_RR_DIV_F                             = 0x05,
     OPC2_32_RR_FTOI                              = 0x10,

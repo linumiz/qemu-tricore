@@ -129,6 +129,11 @@ DEF_HELPER_FLAGS_2(dvstep, TCG_CALL_NO_RWG_SE, i64, i64, i32)
 DEF_HELPER_FLAGS_2(dvstep_u, TCG_CALL_NO_RWG_SE, i64, i64, i32)
 DEF_HELPER_3(divide, i64, env, i32, i32)
 DEF_HELPER_3(divide_u, i64, env, i32, i32)
+/* divide */
+DEF_HELPER_3(divide64, i64, env, i64, i64)
+DEF_HELPER_3(divide64_u, i64, env, i64, i64)
+DEF_HELPER_3(remainder64, i64, env, i64, i64)
+DEF_HELPER_3(remainder64_u, i64, env, i64, i64)
 /* mulh */
 DEF_HELPER_FLAGS_5(mul_h, TCG_CALL_NO_RWG_SE, i64, i32, i32, i32, i32, i32)
 DEF_HELPER_FLAGS_5(mulm_h, TCG_CALL_NO_RWG_SE, i64, i32, i32, i32, i32, i32)
