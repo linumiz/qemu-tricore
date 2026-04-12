@@ -36,6 +36,7 @@ config TC39X_SOC
 
 config TC4DX_SOC
     bool
+    select TC4X_CLOCK
     select TRICORE_ASCLIN
     select TRICORE_IRBUS
     select TRICORE_SCU
@@ -49,4 +50,7 @@ config TRICORE_SCU
 config TRICORE_VIRT
 
 config TRICORE_SFR
+    bool
+
+config TC4X_CLOCK
     bool
