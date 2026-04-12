@@ -130,6 +130,9 @@ static void tricore_cpu_realizefn(DeviceState *dev, Error **errp)
     }
 
     /* Some features automatically imply others */
+    if (tricore_has_feature(env, TRICORE_FEATURE_18)) {
+        set_feature(env, TRICORE_FEATURE_162);
+    }
     if (tricore_has_feature(env, TRICORE_FEATURE_162)) {
         set_feature(env, TRICORE_FEATURE_161);
     }
@@ -188,6 +191,13 @@ static void tc37x_initfn(Object *obj)
     TriCoreCPU *cpu = TRICORE_CPU(obj);
 
     set_feature(&cpu->env, TRICORE_FEATURE_162);
+}
+
+static void tc4x_initfn(Object *obj)
+{
+    TriCoreCPU *cpu = TRICORE_CPU(obj);
+
+    set_feature(&cpu->env, TRICORE_FEATURE_18);
 }
 
 #include "hw/core/sysemu-cpu-ops.h"
@@ -262,6 +272,7 @@ static const TypeInfo tricore_cpu_type_infos[] = {
     DEFINE_TRICORE_CPU_TYPE("tc1797", tc1797_initfn),
     DEFINE_TRICORE_CPU_TYPE("tc27x", tc27x_initfn),
     DEFINE_TRICORE_CPU_TYPE("tc37x", tc37x_initfn),
+    DEFINE_TRICORE_CPU_TYPE("tc4x", tc4x_initfn),
 };
 
 DEFINE_TYPES(tricore_cpu_type_infos)

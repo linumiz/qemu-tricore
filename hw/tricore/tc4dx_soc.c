@@ -199,7 +199,7 @@ static void tc4d7_soc_class_init(ObjectClass *oc, const void *data)
     TC4DXSoCClass *sc = TC4DX_SOC_CLASS(oc);
 
     sc->name         = "tc4dx-soc";
-    sc->cpu_type     = TRICORE_CPU_TYPE_NAME("tc37x");
+    sc->cpu_type     = TRICORE_CPU_TYPE_NAME("tc4x");
     sc->memmap       = tc4dx_soc_memmap;
     sc->num_cpus     = 1;
 }

@@ -175,6 +175,7 @@ enum tricore_features {
     TRICORE_FEATURE_16,
     TRICORE_FEATURE_161,
     TRICORE_FEATURE_162,
+    TRICORE_FEATURE_18,
 };
 
 static inline int tricore_has_feature(CPUTriCoreState *env, int feature)

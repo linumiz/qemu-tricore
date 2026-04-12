@@ -692,6 +692,9 @@ enum {
     OPC2_32_BO_ST_W_SHORTOFF                     = 0x24,
     OPC2_32_BO_ST_W_POSTINC                      = 0x04,
     OPC2_32_BO_ST_W_PREINC                       = 0x14,
+    OPC2_32_BO_ST_DD_SHORTOFF                    = 0x29,
+    OPC2_32_BO_ST_DD_POSTINC                     = 0x09,
+    OPC2_32_BO_ST_DD_PREINC                      = 0x19,
 };
 /* OPCM_32_BO_ADDRMODE_BITREVERSE_CIRCULAR   */
 enum {
@@ -745,6 +748,9 @@ enum {
     OPC2_32_BO_LD_W_SHORTOFF                     = 0x24,
     OPC2_32_BO_LD_W_POSTINC                      = 0x04,
     OPC2_32_BO_LD_W_PREINC                       = 0x14,
+    OPC2_32_BO_LD_DD_SHORTOFF                    = 0x29,
+    OPC2_32_BO_LD_DD_POSTINC                     = 0x09,
+    OPC2_32_BO_LD_DD_PREINC                      = 0x19,
 };
 /* OPCM_32_BO_ADDRMODE_LD_BITREVERSE_CIRCULAR  */
 enum {

@@ -208,6 +208,13 @@ static void generate_trap(DisasContext *ctx, int class, int tin);
     }                                                 \
 } while (0)
 
+#define CHECK_REG_QUAD(reg) do {                     \
+    if (reg & 0x3) {                                 \
+        generate_trap(ctx, TRAPC_INSN_ERR, TIN2_OPD);\
+        return;                                      \
+    }                                                \
+} while (0)
+
 /* Functions for load/save to/from memory */
 
 static void gen_offset_ld(DisasContext *ctx, TCGv_i32 r1, TCGv_i32 r2,
@@ -261,6 +268,38 @@ static void gen_offset_ld_2regs(DisasContext *ctx,
     TCGv_i32 temp = tcg_temp_new_i32();
     tcg_gen_addi_i32(temp, base, con);
     gen_ld_2regs_64(ctx, rh, rl, temp);
+}
+
+static void gen_ld_4regs_128(DisasContext *ctx,
+                             TCGv_i32 rh3, TCGv_i32 rh2,
+                             TCGv_i32 rh1, TCGv_i32 rh0,
+                             TCGv_i32 addr)
+{
+    TCGv_i32 temp = tcg_temp_new_i32();
+
+    tcg_gen_qemu_ld_i32(rh0, addr, ctx->mem_idx, MO_LEUL);
+    tcg_gen_addi_i32(temp, addr, 4);
+    tcg_gen_qemu_ld_i32(rh1, temp, ctx->mem_idx, MO_LEUL);
+    tcg_gen_addi_i32(temp, addr, 8);
+    tcg_gen_qemu_ld_i32(rh2, temp, ctx->mem_idx, MO_LEUL);
+    tcg_gen_addi_i32(temp, addr, 12);
+    tcg_gen_qemu_ld_i32(rh3, temp, ctx->mem_idx, MO_LEUL);
+}
+
+static void gen_st_4regs_128(DisasContext *ctx,
+                             TCGv_i32 rh3, TCGv_i32 rh2,
+                             TCGv_i32 rh1, TCGv_i32 rh0,
+                             TCGv_i32 addr)
+{
+    TCGv_i32 temp = tcg_temp_new_i32();
+
+    tcg_gen_qemu_st_i32(rh0, addr, ctx->mem_idx, MO_LEUL);
+    tcg_gen_addi_i32(temp, addr, 4);
+    tcg_gen_qemu_st_i32(rh1, temp, ctx->mem_idx, MO_LEUL);
+    tcg_gen_addi_i32(temp, addr, 8);
+    tcg_gen_qemu_st_i32(rh2, temp, ctx->mem_idx, MO_LEUL);
+    tcg_gen_addi_i32(temp, addr, 12);
+    tcg_gen_qemu_st_i32(rh3, temp, ctx->mem_idx, MO_LEUL);
 }
 
 static void gen_st_preincr(DisasContext *ctx, TCGv_i32 r1, TCGv_i32 r2,
@@ -4400,6 +4439,45 @@ static void decode_bo_addrmode_post_pre_base(DisasContext *ctx)
     case OPC2_32_BO_ST_W_PREINC:
         gen_st_preincr(ctx, cpu_gpr_d[r1], cpu_gpr_a[r2], off10, MO_LEUL);
         break;
+    case OPC2_32_BO_ST_DD_SHORTOFF:
+        if (has_feature(ctx, TRICORE_FEATURE_18)) {
+            CHECK_REG_QUAD(r1);
+            temp = tcg_temp_new_i32();
+            tcg_gen_addi_i32(temp, cpu_gpr_a[r2], off10);
+            gen_st_4regs_128(ctx,
+                             cpu_gpr_d[r1 + 3], cpu_gpr_d[r1 + 2],
+                             cpu_gpr_d[r1 + 1], cpu_gpr_d[r1],
+                             temp);
+        } else {
+            generate_trap(ctx, TRAPC_INSN_ERR, TIN2_IOPC);
+        }
+        break;
+    case OPC2_32_BO_ST_DD_POSTINC:
+        if (has_feature(ctx, TRICORE_FEATURE_18)) {
+            CHECK_REG_QUAD(r1);
+            gen_st_4regs_128(ctx,
+                             cpu_gpr_d[r1 + 3], cpu_gpr_d[r1 + 2],
+                             cpu_gpr_d[r1 + 1], cpu_gpr_d[r1],
+                             cpu_gpr_a[r2]);
+            tcg_gen_addi_i32(cpu_gpr_a[r2], cpu_gpr_a[r2], off10);
+        } else {
+            generate_trap(ctx, TRAPC_INSN_ERR, TIN2_IOPC);
+        }
+        break;
+    case OPC2_32_BO_ST_DD_PREINC:
+        if (has_feature(ctx, TRICORE_FEATURE_18)) {
+            CHECK_REG_QUAD(r1);
+            temp = tcg_temp_new_i32();
+            tcg_gen_addi_i32(temp, cpu_gpr_a[r2], off10);
+            gen_st_4regs_128(ctx,
+                             cpu_gpr_d[r1 + 3], cpu_gpr_d[r1 + 2],
+                             cpu_gpr_d[r1 + 1], cpu_gpr_d[r1],
+                             temp);
+            tcg_gen_mov_i32(cpu_gpr_a[r2], temp);
+        } else {
+            generate_trap(ctx, TRAPC_INSN_ERR, TIN2_IOPC);
+        }
+        break;
     default:
         generate_trap(ctx, TRAPC_INSN_ERR, TIN2_IOPC);
     }
@@ -4640,6 +4718,45 @@ static void decode_bo_addrmode_ld_post_pre_base(DisasContext *ctx)
         break;
     case OPC2_32_BO_LD_W_PREINC:
         gen_ld_preincr(ctx, cpu_gpr_d[r1], cpu_gpr_a[r2], off10, MO_LEUL);
+        break;
+    case OPC2_32_BO_LD_DD_SHORTOFF:
+        if (has_feature(ctx, TRICORE_FEATURE_18)) {
+            CHECK_REG_QUAD(r1);
+            temp = tcg_temp_new_i32();
+            tcg_gen_addi_i32(temp, cpu_gpr_a[r2], off10);
+            gen_ld_4regs_128(ctx,
+                             cpu_gpr_d[r1 + 3], cpu_gpr_d[r1 + 2],
+                             cpu_gpr_d[r1 + 1], cpu_gpr_d[r1],
+                             temp);
+        } else {
+            generate_trap(ctx, TRAPC_INSN_ERR, TIN2_IOPC);
+        }
+        break;
+    case OPC2_32_BO_LD_DD_POSTINC:
+        if (has_feature(ctx, TRICORE_FEATURE_18)) {
+            CHECK_REG_QUAD(r1);
+            gen_ld_4regs_128(ctx,
+                             cpu_gpr_d[r1 + 3], cpu_gpr_d[r1 + 2],
+                             cpu_gpr_d[r1 + 1], cpu_gpr_d[r1],
+                             cpu_gpr_a[r2]);
+            tcg_gen_addi_i32(cpu_gpr_a[r2], cpu_gpr_a[r2], off10);
+        } else {
+            generate_trap(ctx, TRAPC_INSN_ERR, TIN2_IOPC);
+        }
+        break;
+    case OPC2_32_BO_LD_DD_PREINC:
+        if (has_feature(ctx, TRICORE_FEATURE_18)) {
+            CHECK_REG_QUAD(r1);
+            temp = tcg_temp_new_i32();
+            tcg_gen_addi_i32(temp, cpu_gpr_a[r2], off10);
+            gen_ld_4regs_128(ctx,
+                             cpu_gpr_d[r1 + 3], cpu_gpr_d[r1 + 2],
+                             cpu_gpr_d[r1 + 1], cpu_gpr_d[r1],
+                             temp);
+            tcg_gen_mov_i32(cpu_gpr_a[r2], temp);
+        } else {
+            generate_trap(ctx, TRAPC_INSN_ERR, TIN2_IOPC);
+        }
         break;
     default:
         generate_trap(ctx, TRAPC_INSN_ERR, TIN2_IOPC);
