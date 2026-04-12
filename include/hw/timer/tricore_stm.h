@@ -81,20 +81,12 @@ typedef struct {
     /* <public> */
     MemoryRegion iomem;
     uint32_t regs[STM_R_MAX];
-    MemoryRegion srvcreqregs; /* workaround */
-    uint32_t SRC_STM0SR0;    /* workaround TODO move to dedicated device */
-    uint32_t SRC_STM0SR1;    /* workaround TODO move to dedicated device */
-    uint32_t SRC_STM1SR0;    /* workaround TODO move to dedicated device */
-    uint32_t SRC_STM1SR1;    /* workaround TODO move to dedicated device */
-    uint32_t SRC_STM2SR0;    /* workaround TODO move to dedicated device */
-    uint32_t SRC_STM2SR1;    /* workaround TODO move to dedicated device */
-    TriCoreSCUState *scu;
+    
+    Clock *fstm;
     qemu_irq irq;
-    uint32_t freq_hz;
     uint64_t tim_counter;
-    //uint64_t counter_offset;
+    int64_t tim_base_ns;
     bool tc4x_mode;
-    int64_t realtime_base_ns;
 } TriCoreSTMState;
 
 #endif

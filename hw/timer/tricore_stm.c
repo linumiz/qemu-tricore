@@ -8,17 +8,13 @@
  *
  */
 #include "qemu/osdep.h"
+#include "hw/core/clock.h"
+#include "hw/core/irq.h"
+#include "hw/core/qdev-clock.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/timer/tricore_stm.h"
-#include <stdio.h>
-#include <inttypes.h>
-#include "qemu/log.h"
-#include "qemu/error-report.h"
-#include "qapi/error.h"
-#include "hw/core/ptimer.h"
+#include "qemu/bitops.h"
 #include "qemu/timer.h"
-#include "hw/core/irq.h"
-#include <math.h>
 
 enum {
     CLC,
@@ -51,133 +47,86 @@ enum {
 };
 
 /* TC4x per-CPU STM VM1 register offsets */
-#define TC4X_VM1_CMP0   (0x120 / 4)
-#define TC4X_VM1_CMP1   (0x124 / 4)
-#define TC4X_VM1_CMCON  (0x128 / 4)
-#define TC4X_VM1_ICR    (0x12C / 4)
-#define TC4X_VM1_ISCR   (0x130 / 4)
-#define TC4X_ABS        (0x020 / 4)
-#define TC4X_ABS_HI     (0x024 / 4)
+#define TC4X_VM1_CMP0 (0x120 / 4)
+#define TC4X_VM1_CMP1 (0x124 / 4)
+#define TC4X_VM1_CMCON (0x128 / 4)
+#define TC4X_VM1_ICR (0x12C / 4)
+#define TC4X_VM1_ISCR (0x130 / 4)
+#define TC4X_ABS (0x020 / 4)
+#define TC4X_ABS_HI (0x024 / 4)
 
 static hwaddr stm_tc4x_remap(hwaddr reg_addr)
 {
     switch (reg_addr) {
-    case TC4X_ABS:       return TIM0;
-    case TC4X_ABS_HI:    return TIM6;
-    case TC4X_VM1_CMP0:  return CMP0;
-    case TC4X_VM1_CMP1:  return CMP1;
-    case TC4X_VM1_CMCON: return CMCON;
-    case TC4X_VM1_ICR:   return ICR;
-    case TC4X_VM1_ISCR:  return ISCR;
-    default: break;
+    case TC4X_ABS:
+        return TIM0;
+    case TC4X_ABS_HI:
+        return CAP;
+    case TC4X_VM1_CMP0:
+        return CMP0;
+    case TC4X_VM1_CMP1:
+        return CMP1;
+    case TC4X_VM1_CMCON:
+        return CMCON;
+    case TC4X_VM1_ICR:
+        return ICR;
+    case TC4X_VM1_ISCR:
+        return ISCR;
+    default:
+        break;
     }
     return reg_addr;
 }
 
-static uint64_t tricore_stm_get_tim_update_regs(TriCoreSTMState *s,
-        int timshift, char bUpdateTIM);
-
-static void tricore_stm_update_irqs(void *opaque)
+static void tricore_stm_tim_update(TriCoreSTMState *s)
 {
-    TriCoreSTMState *s = (TriCoreSTMState *) opaque;
-
-    if (s->regs[ICR] & MASK_ICR_CMP0IR) {
-        qemu_irq_raise(s->irq);
-    } else {
-        qemu_irq_lower(s->irq);
-    }
-}
-
-#if 0
-static void tricore_stm_update_freq(TriCoreSTMState *s)
-{
-    ptimer_transaction_begin(s->ptimer);
-    uint32_t freq = tricore_scu_get_stmclock(s->scu);
-    if (freq == 0) {
-        freq = RESET_TRICORE_STM_FREQUENCY;
-    }
-    s->freq_hz = freq;
-    ptimer_set_freq(s->ptimer, freq);
-    ptimer_transaction_commit(s->ptimer);
-}
-#endif
-
-#if 0
-static void tricore_stm_timer_start(TriCoreSTMState *s)
-{
-    timer_del(s->timer);
-
-    if (s->regs[CMP0] == 0) {
-        return;
-    }
-
-    uint32_t mstart = (s->regs[CMCON] & MASK_CMCON_MSTART0) >> 8;
-    uint32_t msize  = (s->regs[CMCON] & MASK_CMCON_MSIZE0);
-    uint32_t nbits  = msize + 1;
-    uint32_t mask   = (nbits >= 32) ? 0xFFFFFFFFu : ((1u << nbits) - 1);
-
-    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
-    int64_t elapsed = now - s->realtime_base_ns;
-
-    s->counter_offset += muldiv64(elapsed, s->freq_hz, NANOSECONDS_PER_SECOND);
-    s->realtime_base_ns = now;
-    s->tim_counter = s->counter_offset;
-
-    uint32_t window_val = (uint32_t)(s->tim_counter >> mstart) & mask;
-    uint32_t target = s->regs[CMP0] & mask;
-
-    uint32_t delta;
-    if (target > window_val) {
-        delta = target - window_val;
-    } else {
-        delta = (mask - window_val) + 1 + target;
-    }
-
-    uint64_t timeout_ticks = (uint64_t)delta << mstart;
-    int64_t timeout_ns = muldiv64(timeout_ticks,
-                                  NANOSECONDS_PER_SECOND, s->freq_hz);
-
-    timer_mod(s->timer, now + timeout_ns);
-}
-#endif
-
-static void tricore_stm_timer_start(TriCoreSTMState *s)
-{
-    timer_del(s->timer);
- 
-    if (s->regs[CMP0] == 0) {
-        return;
-    }
- 
-    uint32_t mstart = (s->regs[CMCON] & MASK_CMCON_MSTART0) >> 8;
-    uint32_t msize  = (s->regs[CMCON] & MASK_CMCON_MSIZE0);
-    uint32_t nbits  = msize + 1;
-    uint32_t mask   = (nbits >= 32) ? 0xFFFFFFFFu : ((1u << nbits) - 1);
- 
-    tricore_stm_get_tim_update_regs(s, 0, 0);
- 
-    uint32_t window_val = (uint32_t)(s->tim_counter >> mstart) & mask;
-    uint32_t target = s->regs[CMP0] & mask;
- 
-    uint32_t delta;
-    if (target > window_val) {
-        delta = target - window_val;
-    } else {
-        delta = (mask - window_val) + 1 + target;
-    }
- 
-    uint64_t timeout_ticks = (uint64_t)delta << mstart;
-    int64_t timeout_ns = muldiv64(timeout_ticks,
-                                  NANOSECONDS_PER_SECOND, s->freq_hz);
     int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
- 
-    timer_mod(s->timer, now + timeout_ns);
+    s->tim_counter += clock_ns_to_ticks(s->fstm, now - s->tim_base_ns);
+    s->tim_base_ns = now;
+}
+
+static void tricore_stm_timer_update(TriCoreSTMState *s)
+{
+    uint32_t mstart = (s->regs[CMCON] & MASK_CMCON_MSTART0) >> 8;
+    uint32_t msize = (s->regs[CMCON] & MASK_CMCON_MSIZE0);
+    uint32_t nbits = msize + 1;
+    uint64_t tim_target = s->tim_counter;
+
+    if ((s->regs[ICR] & MASK_ICR_CMP0EN) == 0 && (s->regs[ICR] & MASK_ICR_CMP0IR)) {
+        return;
+    }
+
+    /* Calculate the target TIM value */
+    if (mstart) {
+        tim_target = deposit64(tim_target, 0, mstart, 0);
+    }
+    tim_target = deposit64(tim_target, mstart, nbits, (uint64_t)s->regs[CMP0]);
+
+    /* Wrap around if needed */
+    if (tim_target <= s->tim_counter) {
+        tim_target += (1ull << (mstart + nbits));
+    }
+
+    timer_mod(s->timer,
+              s->tim_base_ns +
+                  clock_ticks_to_ns(s->fstm, tim_target - s->tim_counter));
+}
+
+static void tricore_stm_clock_update(void *opaque, enum ClockEvent event)
+{
+    TriCoreSTMState *s = (TriCoreSTMState *)opaque;
+
+    if (event == ClockPreUpdate) {
+        tricore_stm_tim_update(s);
+    } else {
+        tricore_stm_timer_update(s);
+    }
 }
 
 static void tricore_stm_write(void *opaque, hwaddr offset, uint64_t value,
-        unsigned size)
+                              unsigned size)
 {
-    TriCoreSTMState *s = (TriCoreSTMState *) opaque;
+    TriCoreSTMState *s = (TriCoreSTMState *)opaque;
     hwaddr reg_addr = offset >> 2;
 
     if (s->tc4x_mode) {
@@ -210,18 +159,15 @@ static void tricore_stm_write(void *opaque, hwaddr offset, uint64_t value,
     case TIM5:
     case TIM6:
     case CAP:
+        s->regs[reg_addr] = value;
+        break;
     case CMP0:
-         s->regs[reg_addr] = value;
-#if 0
-         error_report("STM CMP0 write: val=0x%x counter=0x%lx freq=%u",
-                      (uint32_t)value, (unsigned long)s->tim_counter, s->freq_hz);
-#endif
-         tricore_stm_timer_start(s);
-         break;
+        s->regs[reg_addr] = value;
+        tricore_stm_tim_update(s);
+        tricore_stm_timer_update(s);
+        break;
     case CMP1:
     case ICR:
-         s->regs[reg_addr] = value;
-         break;
     case TIM0SV:
     case CAPSV:
     case OCS:
@@ -234,14 +180,10 @@ static void tricore_stm_write(void *opaque, hwaddr offset, uint64_t value,
         break;
     case CMCON:
         s->regs[reg_addr] = value;
-        tricore_stm_timer_start(s);
+        tricore_stm_tim_update(s);
+        tricore_stm_timer_update(s);
         break;
     case ISCR:
-#if 0
-        error_report("STM ISCR write: val=0x%lx ICR_before=0x%x",
-                     (unsigned long)value, s->regs[ICR]);
-#endif
-
         if (value & MASK_ISCR_CMP0IRR) {
             qatomic_and(&s->regs[ICR], ~MASK_ICR_CMP0IR);
         }
@@ -254,99 +196,40 @@ static void tricore_stm_write(void *opaque, hwaddr offset, uint64_t value,
         if (value & MASK_ISCR_CMP1IRS) {
             qatomic_or(&s->regs[ICR], MASK_ICR_CMP1IR);
         }
-        tricore_stm_update_irqs(opaque);
         break;
     default:
         break;
     }
-
-    tricore_stm_update_irqs(opaque);
 }
-
-static uint64_t tricore_stm_get_tim_update_regs(TriCoreSTMState *s,
-        int timshift, char bUpdateTIM)
-{
-    int64_t now_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) - s->realtime_base_ns;
- 
-    s->tim_counter = muldiv64(now_ns, s->freq_hz, NANOSECONDS_PER_SECOND);
- 
-    uint64_t r = (uint32_t)(s->tim_counter >> timshift);
- 
-    if (bUpdateTIM) {
-        s->regs[CAP] = (uint32_t)(s->tim_counter >> 32);
-    }
-    return r;
-}
-
-#if 0
-static uint64_t tricore_stm_get_tim_update_regs(TriCoreSTMState *s,
-        int timshift, char bUpdateTIM)
-{
-    int64_t now_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - s->realtime_base_ns;
-    uint64_t delta = muldiv64(now_ns, s->freq_hz, NANOSECONDS_PER_SECOND);
-
-    s->tim_counter = s->counter_offset + delta;
-
-    error_report("STM read: offset=0x%lx delta=0x%lx total=0x%lx shift=%d",
-                 (unsigned long)s->counter_offset,
-                 (unsigned long)delta,
-                 (unsigned long)s->tim_counter, timshift);
-
-    uint64_t r = (uint32_t)(s->tim_counter >> timshift);
-
-    if (bUpdateTIM) {
-        s->regs[CAP] = (uint32_t)(s->tim_counter >> 32);
-    }
-
-    return r;
-}
-#endif
 
 static uint64_t tricore_stm_read(void *opaque, hwaddr offset, unsigned size)
 {
-    TriCoreSTMState *s = (TriCoreSTMState *) opaque;
+    TriCoreSTMState *s = (TriCoreSTMState *)opaque;
     uint64_t r = 0x0;
     hwaddr reg_addr = offset >> 2;
-
-#if 0
-    error_report("STM read: offset=0x%lx size=%d reg_addr=0x%lx tc4x=%d",
-                 (unsigned long)offset, size, (unsigned long)reg_addr, s->tc4x_mode);
-#endif
 
     if (s->tc4x_mode) {
         reg_addr = stm_tc4x_remap(reg_addr);
     }
 
+    if ((reg_addr >= TIM0 && reg_addr <= TIM6) || reg_addr == TIM0SV) {
+        tricore_stm_tim_update(s);
+        s->regs[CAP] = (uint32_t)(s->tim_counter >> 32);
+    }
+
     switch (reg_addr) {
     case CLC:
     case ID:
+        r = s->regs[reg_addr];
+        break;
     case TIM0:
-        r = tricore_stm_get_tim_update_regs(s, 0, 1);
-        if (s->tc4x_mode && size == 8) {
-            r |= ((uint64_t)s->regs[CAP]) << 32;
-        }
-        break;
     case TIM1:
-        r = tricore_stm_get_tim_update_regs(s, 4, 1);
-        break;
     case TIM2:
-        r = tricore_stm_get_tim_update_regs(s, 8, 1);
-        break;
     case TIM3:
-        r = tricore_stm_get_tim_update_regs(s, 12, 1);
-        break;
     case TIM4:
-        if (s->tc4x_mode) {
-            r = tricore_stm_get_tim_update_regs(s, 0, 1);
-        } else {
-            r = tricore_stm_get_tim_update_regs(s, 16, 1);
-        }
-        break;
     case TIM5:
-        r = tricore_stm_get_tim_update_regs(s, 20, 1);
-        break;
     case TIM6:
-        r = tricore_stm_get_tim_update_regs(s, 32, 1);
+        r = s->tim_counter << (reg_addr - TIM0) * 4;
         break;
     case CAP:
         r = s->regs[CAP];
@@ -361,10 +244,11 @@ static uint64_t tricore_stm_read(void *opaque, hwaddr offset, unsigned size)
         r = s->regs[reg_addr];
         break;
     case TIM0SV:
-        r = 0x0;
-        s->regs[CAP] = (uint32_t) (s->tim_counter >> 32);
+        r = s->tim_counter;
         break;
     case CAPSV:
+        r = s->regs[CAP];
+        break;
     case OCS:
     case KRSTCLR:
     case KRST1:
@@ -416,59 +300,31 @@ static const MemoryRegionOps tricore_stm_ops = {
                 .min_access_size = 4, .max_access_size = 8, }, .endianness =
                 DEVICE_LITTLE_ENDIAN, };
 
-#if 0
 static void tricore_stm_timer_hit(void *opaque)
 {
-    TriCoreSTMState *s = (TriCoreSTMState *) opaque;
-
-    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
-    int64_t elapsed = now - s->realtime_base_ns;
-
-    s->counter_offset += muldiv64(elapsed, s->freq_hz, NANOSECONDS_PER_SECOND);
-    s->realtime_base_ns = now;
-
-    error_report("STM timer_hit: counter_offset=0x%lx elapsed_ns=%ld",
-                 (unsigned long)s->counter_offset, (long)elapsed);
+    TriCoreSTMState *s = (TriCoreSTMState *)opaque;
 
     qatomic_or(&s->regs[ICR], MASK_ICR_CMP0IR);
-    tricore_stm_update_irqs(opaque);
-}
 
-static void tricore_stm_timer_hit(void *opaque)
-{
-    TriCoreSTMState *s = (TriCoreSTMState *) opaque;
-    qatomic_or(&s->regs[ICR], MASK_ICR_CMP0IR);
-    tricore_stm_update_irqs(opaque);
-}
-#endif
+    if (s->regs[ICR] & MASK_ICR_CMP0EN) {
+        qemu_irq_pulse(s->irq);
+    }
 
-static void tricore_stm_timer_hit(void *opaque)
-{
-    TriCoreSTMState *s = (TriCoreSTMState *) opaque;
-//    error_report("STM timer_hit fired");
-    qatomic_or(&s->regs[ICR], MASK_ICR_CMP0IR);
-    tricore_stm_update_irqs(opaque);
+    tricore_stm_tim_update(s);
+    tricore_stm_timer_update(s);
 }
 
 static void tricore_stm_realize(DeviceState *dev, Error **errp)
 {
     TriCoreSTMState *s = TRICORE_STM(dev);
     SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
-    Error *err = NULL;
 
-    s->scu = (TriCoreSCUState *)object_property_get_link(OBJECT(dev), "scu", &err);
-    if (!s->scu) {
-        error_setg(errp, "tricore_stm: scu link not found");
-        return;
-    }
-
-    s->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
-                            tricore_stm_timer_hit, s);
-    s->freq_hz = tricore_scu_get_stmclock(s->scu);
-    if (s->freq_hz == 0) {
-        s->freq_hz = RESET_TRICORE_STM_FREQUENCY;
-    }
-    s->realtime_base_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    s->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, tricore_stm_timer_hit, s);
+    s->tim_base_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    s->tim_counter = 0x0;
+    /* Trigger timer for 0 compare */
+    s->regs[ICR] = MASK_ICR_CMP1IR | MASK_ICR_CMP0IR;
+    /* TODO: qemu_irq_pulse(s->irq); */
 
     sysbus_init_mmio(sbd, &s->iomem);
     sysbus_init_irq(sbd, &s->irq);
@@ -478,8 +334,9 @@ static void tricore_stm_init(Object *obj)
 {
     TriCoreSTMState *s = TRICORE_STM(obj);
     memory_region_init_io(&s->iomem, OBJECT(s), &tricore_stm_ops, s,
-            "tricore_stm", 0x200);
-    s->tim_counter = 0x0;
+                          "tricore_stm", 0x200);
+    s->fstm = qdev_init_clock_in(DEVICE(s), "fstm", tricore_stm_clock_update, s,
+                                 ClockPreUpdate | ClockUpdate);
 }
 
 static const Property tricore_stm_properties[] = {
@@ -495,9 +352,12 @@ static void tricore_stm_class_init(ObjectClass *klass, const void *data)
 }
 
 static const TypeInfo tricore_stm_info = {
-        .name = TYPE_TRICORE_STM, .parent = TYPE_SYS_BUS_DEVICE,
-        .instance_size = sizeof(TriCoreSTMState), .instance_init =
-                tricore_stm_init, .class_init = tricore_stm_class_init, };
+    .name = TYPE_TRICORE_STM,
+    .parent = TYPE_SYS_BUS_DEVICE,
+    .instance_size = sizeof(TriCoreSTMState),
+    .instance_init = tricore_stm_init,
+    .class_init = tricore_stm_class_init,
+};
 
 static void tricore_stm_register_types(void)
 {
