@@ -30,89 +30,18 @@
 
 /* Exception helpers */
 
-static G_NORETURN
-void raise_exception_sync_internal(CPUTriCoreState *env, uint32_t class, int tin,
-                                   uintptr_t pc, uint32_t fcd_pc)
+G_NORETURN void tricore_raise_exception(CPUTriCoreState *env,
+                                      uint8_t tclass, uint8_t tin, uintptr_t pc)
 {
-    CPUState *cs = env_cpu(env);
-    uint64_t last_pc;
-
-    /* in case we come from a helper-call we need to restore the PC */
-    cpu_restore_state(cs, pc);
-    last_pc = env->PC;
-
-    /* Tin is loaded into d[15] */
-    env->gpr_d[15] = tin;
-
-    if (class == TRAPC_CTX_MNG && tin == TIN3_FCU) {
-        /* upper context cannot be saved, if the context list is empty */
-    } else {
-        helper_svucx(env);
-    }
-
-    /* The return address in a[11] is updated */
-    if (class == TRAPC_CTX_MNG && tin == TIN3_FCD) {
-        env->SYSCON |= MASK_SYSCON_FCD_SF;
-        /* when we run out of CSAs after saving a context a FCD trap is taken
-           and the return address is the start of the trap handler which used
-           the last CSA */
-        env->gpr_a[11] = fcd_pc;
-    } else if (class == TRAPC_SYSCALL) {
-        env->gpr_a[11] = env->PC + 4;
-    } else {
-        env->gpr_a[11] = env->PC;
-    }
-    /* The stack pointer in A[10] is set to the Interrupt Stack Pointer (ISP)
-       when the processor was not previously using the interrupt stack
-       (in case of PSW.IS = 0). The stack pointer bit is set for using the
-       interrupt stack: PSW.IS = 1. */
-    if ((env->PSW & MASK_PSW_IS) == 0) {
-        env->gpr_a[10] = env->ISP;
-    }
-    env->PSW |= MASK_PSW_IS;
-    /* The I/O mode is set to Supervisor mode, which means all permissions
-       are enabled: PSW.IO = 10 B .*/
-    env->PSW |= (2 << 10);
-
-    /*The current Protection Register Set is set to 0: PSW.PRS = 00 B .*/
-    env->PSW &= ~MASK_PSW_PRS;
-
-    /* The Call Depth Counter (CDC) is cleared, and the call depth limit is
-       set for 64: PSW.CDC = 0000000 B .*/
-    env->PSW &= ~MASK_PSW_CDC;
-
-    /* Call Depth Counter is enabled, PSW.CDE = 1. */
-    env->PSW |= MASK_PSW_CDE;
-
-    /* Write permission to global registers A[0], A[1], A[8], A[9] is
-       disabled: PSW.GW = 0. */
-    env->PSW &= ~MASK_PSW_GW;
-
-    /*The interrupt system is globally disabled: ICR.IE = 0. The ‘old’
-      ICR.IE and ICR.CCPN are saved */
-
-    /* PCXI.PIE = ICR.IE */
-    pcxi_set_pie(env, icr_get_ie(env));
-
-    /* PCXI.PCPN = ICR.CCPN */
-    pcxi_set_pcpn(env, icr_get_ccpn(env));
-    /* Update PC using the trap vector table */
-    env->PC = env->BTV | (class << 5);
-
-    qemu_plugin_vcpu_exception_cb(cs, last_pc);
-    cpu_loop_exit(cs);
+    CPUState *cpu = env_cpu(env);
+    cpu->exception_index = tclass;
+    env->tin = tin;
+    cpu_loop_exit_restore(cpu, pc);
 }
 
-void helper_raise_exception_sync(CPUTriCoreState *env, uint32_t class,
-                                 uint32_t tin)
+void helper_raise_exception(CPUTriCoreState *env, uint32_t tclass, uint32_t tin)
 {
-    raise_exception_sync_internal(env, class, tin, 0, 0);
-}
-
-static void raise_exception_sync_helper(CPUTriCoreState *env, uint32_t class,
-                                        uint32_t tin, uintptr_t pc)
-{
-    raise_exception_sync_internal(env, class, tin, pc, 0);
+    tricore_raise_exception(env, tclass, tin, 0);
 }
 
 /* Addressing mode helper */
@@ -2561,7 +2490,7 @@ static bool cdc_zero(uint32_t *psw)
     return count == 0;
 }
 
-static void save_context_upper(CPUTriCoreState *env, uint32_t ea)
+void tricore_store_context_upper(CPUTriCoreState *env, uint32_t ea)
 {
     cpu_stl_le_data(env, ea, env->PCXI);
     cpu_stl_le_data(env, ea + 4, psw_read(env));
@@ -2581,7 +2510,7 @@ static void save_context_upper(CPUTriCoreState *env, uint32_t ea)
     cpu_stl_le_data(env, ea + 60, env->gpr_d[15]);
 }
 
-static void save_context_lower(CPUTriCoreState *env, uint32_t ea)
+void tricore_store_context_lower(CPUTriCoreState *env, uint32_t ea)
 {
     cpu_stl_le_data(env, ea, env->PCXI);
     cpu_stl_le_data(env, ea + 4, env->gpr_a[11]);
@@ -2601,7 +2530,7 @@ static void save_context_lower(CPUTriCoreState *env, uint32_t ea)
     cpu_stl_le_data(env, ea + 60, env->gpr_d[7]);
 }
 
-static void restore_context_upper(CPUTriCoreState *env, uint32_t ea,
+void tricore_load_context_upper(CPUTriCoreState *env, uint32_t ea,
                                   uint32_t *new_PCXI, uint32_t *new_PSW)
 {
     *new_PCXI = cpu_ldl_le_data(env, ea);
@@ -2622,7 +2551,7 @@ static void restore_context_upper(CPUTriCoreState *env, uint32_t ea,
     env->gpr_d[15] = cpu_ldl_le_data(env, ea + 60);
 }
 
-static void restore_context_lower(CPUTriCoreState *env, uint32_t ea,
+void tricore_load_context_lower(CPUTriCoreState *env, uint32_t ea,
                                   uint32_t *ra, uint32_t *pcxi)
 {
     *pcxi = cpu_ldl_le_data(env, ea);
@@ -2643,125 +2572,6 @@ static void restore_context_lower(CPUTriCoreState *env, uint32_t ea,
     env->gpr_d[7] = cpu_ldl_le_data(env, ea + 60);
 }
 
-void tricore_cpu_do_interrupt(CPUState *cs)
-{
-    TriCoreCPU *cpu = TRICORE_CPU(cs);
-    CPUTriCoreState *env = &cpu->env;
-    target_ulong ea;
-    target_ulong new_FCX;
-    target_ulong psw;
-
-    psw = psw_read(env);
-    cs->exception_index = -1;
-
-    if (env->PSW & MASK_PSW_CDE) {
-        if (cdc_increment(&psw)) {
-            /* CDO trap */
-            qemu_log(
-                    "tricore_cpu_do_interrupt raise exception env->PSW 0x%x\n",
-                    env->PSW);
-            /* raise_exception_sync_helper(env,
-             * TRAPC_CTX_MNG, TIN3_CDO, GETPC()); */
-        }
-    }
-
-    /* PSW.CDE = 1;*/
-    psw = (env->PSW & (~MASK_PSW_CDE)) | (0b1 << 7);
-
-    /*
-     if (env->FCX == 0) {
-     FCU trap
-     raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_FCU, GETPC() );
-     }
-     */
-
-    /* The following functionality is defined in the Architecture
-     Guide Vol. 1 page 5-2. Save upper context of current task.
-     EA = {FCX.FCXS, 6'b0, FCX.FCXO, 6'b0}; */
-    ea = ((env->FCX & MASK_FCX_FCXS) << 12) + ((env->FCX & MASK_FCX_FCXO) << 6);
-
-    /* new_FCX = M(EA, word); */
-    new_FCX = cpu_ldl_le_data(env, ea);
-
-    helper_stucx(env, ea);
-
-    env->PSW = psw;
-
-    /* PCXI.UL = 1; */
-    pcxi_set_ul(env, 1);
-
-    /* The interrupt system is globally disabled: ICR.IE = 0.
-     The old ICR.IE is saved into PCXI.PIE. */
-    pcxi_set_pie(env, icr_get_ie(env));
-    icr_set_ie(env, 0);
-
-    /* The Current CPU Priority Number (ICR.CCPN) is saved into the Previous
-     CPU Priority Number (PCXI.PCPN) field. */
-    pcxi_set_pcpn(env, icr_get_ccpn(env));
-
-    /* if (tmp_FCX == LCX) trap(FCD);
-     if (tmp_FCX == env->LCX) {
-     FCD trap
-     raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_FCD, GETPC());
-     }
-     */
-
-    /* If the processor was not previously using the interrupt stack
-     (PSW.IS = 0), then the A[10] Stack Pointer is set to the interrupt
-     stack pointer (ISP). The stack pointer bit is then set for using
-     the interrupt stack: PSW.IS = 1. */
-    if ((env->PSW & MASK_PSW_IS) >> 9 == 0x0) {
-        env->gpr_a[10] = env->ISP;
-        env->PSW = (env->PSW & (~MASK_PSW_IS)) | (0b1 << 9);
-    }
-
-    /* The I/O mode is set to Supervisor mode, which means all permissions are
-     enabled: PSW.IO = 10B. */
-    env->PSW = (env->PSW & (~MASK_PSW_IO)) | (0b10 << 10);
-
-    /* The current Protection Register Set is set to 0: PSW.PRS = 00B. */
-    env->PSW = (env->PSW & (~MASK_PSW_PRS)) | (0b00 << 12);
-
-    /* The Call Depth Counter (PSW.CDC) is cleared, and the call depth limit
-     selector is set for 64: PSW.CDC = 0000000B. */
-    env->PSW = (env->PSW & (~MASK_PSW_CDC)) | (0b0000000);
-
-    /* Call Depth Counter is enabled, PSW.CDE = 1. */
-    env->PSW = (env->PSW & (~MASK_PSW_CDE)) | (0b1 << 7);
-
-    /* PSW Safety bit is set to value defined in the SYSCON register. PSW.S =
-     SYSCON.IS. */
-    env->PSW = (env->PSW & (~MASK_PSW_S))
-            | ((env->SYSCON & MASK_SYSCON_IS) << 12);
-
-    /* Write permission to global registers A[0], A[1], A[8], A[9] is disabled:
-      PSW.GW = 0. */
-    env->PSW = (env->PSW & (~MASK_PSW_GW)) | (0b0 << 8);
-
-    /* The Pending Interrupt Priority Number (ICR.PIPN) is saved into the
-    Current CPU Priority Number (ICR.CCPN) field. */
-    env->ICR = (env->ICR & (~MASK_ICR_CCPN))
-            | ((env->ICR & (MASK_ICR_PIPN)) >> 16);
-
-    /* Return Address (A[11]) is updated with the current PC. */
-    env->gpr_a[11] = env->PC;
-
-    /* New PC register calculation. */
-    if ((env->BIV & MASK_BIV_VSS) == 0) {
-        env->PC = (env->BIV & 0xFFFFFFFE) | 0b0
-                | ((env->ICR & MASK_ICR_PIPN) >> 11);
-    } else {
-        env->PC = (env->BIV & 0xFFFFFFFE) | 0b0
-                | ((env->ICR & MASK_ICR_PIPN) >> 13);
-    }
-
-    /* Update FCX.FCXS FCX.FCXO
-     PCXI[19: 0] = FCX[19: 0]; */
-    env->PCXI = (env->PCXI & 0xfff00000) | (env->FCX & 0xfffff);
-    /* FCX[19: 0] = new_FCX[19: 0]; */
-    env->FCX = (env->FCX & 0xfff00000) | (new_FCX & 0xfffff);
-}
-
 void helper_call(CPUTriCoreState *env, uint32_t next_pc)
 {
     uint32_t tmp_FCX;
@@ -2773,13 +2583,13 @@ void helper_call(CPUTriCoreState *env, uint32_t next_pc)
     /* if (FCX == 0) trap(FCU); */
     if (env->FCX == 0) {
         /* FCU trap */
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_FCU, GETPC());
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_FCU, GETPC());
     }
     /* if (PSW.CDE) then if (cdc_increment()) then trap(CDO); */
     if (psw & MASK_PSW_CDE) {
         if (cdc_increment(&psw)) {
             /* CDO trap */
-            raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_CDO, GETPC());
+            tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_CDO, GETPC());
         }
     }
     /* PSW.CDE = 1;*/
@@ -2801,7 +2611,7 @@ void helper_call(CPUTriCoreState *env, uint32_t next_pc)
     /* M(EA, 16 * word) = {PCXI, PSW, A[10], A[11], D[8], D[9], D[10], D[11],
                            A[12], A[13], A[14], A[15], D[12], D[13], D[14],
                            D[15]}; */
-    save_context_upper(env, ea);
+    tricore_store_context_upper(env, ea);
 
     /* PCXI.PCPN = ICR.CCPN; */
     pcxi_set_pcpn(env, icr_get_ccpn(env));
@@ -2820,7 +2630,7 @@ void helper_call(CPUTriCoreState *env, uint32_t next_pc)
     /* if (tmp_FCX == LCX) trap(FCD);*/
     if (tmp_FCX == env->LCX) {
         /* FCD trap */
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_FCD, GETPC());
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_FCD, GETPC());
     }
     psw_write(env, psw);
 }
@@ -2837,21 +2647,21 @@ void helper_ret(CPUTriCoreState *env)
         if (cdc_decrement(&psw)) {
             /* CDU trap */
             psw_write(env, psw);
-            raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_CDU, GETPC());
+            tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_CDU, GETPC());
         }
     }
     /*   if (PCXI[19: 0] == 0) then trap(CSU); */
     if ((env->PCXI & 0xfffff) == 0) {
         /* CSU trap */
         psw_write(env, psw);
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_CSU, GETPC());
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_CSU, GETPC());
     }
     /* if (PCXI.UL == 0) then trap(CTYP); */
     if (pcxi_get_ul(env) == 0) {
         /* CTYP trap */
         cdc_increment(&psw); /* restore to the start of helper */
         psw_write(env, psw);
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_CTYP, GETPC());
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_CTYP, GETPC());
     }
     /* PC = {A11 [31: 1], 1’b0}; */
     env->PC = env->gpr_a[11] & 0xfffffffe;
@@ -2861,7 +2671,7 @@ void helper_ret(CPUTriCoreState *env)
          (pcxi_get_pcxo(env) << 6);
     /* {new_PCXI, new_PSW, A[10], A[11], D[8], D[9], D[10], D[11], A[12],
         A[13], A[14], A[15], D[12], D[13], D[14], D[15]} = M(EA, 16 * word); */
-    restore_context_upper(env, ea, &new_PCXI, &new_PSW);
+    tricore_load_context_upper(env, ea, &new_PCXI, &new_PSW);
     /* M(EA, word) = FCX; */
     cpu_stl_le_data(env, ea, env->FCX);
     /* FCX[19: 0] = PCXI[19: 0]; */
@@ -2894,7 +2704,7 @@ void helper_bisr(CPUTriCoreState *env, uint32_t const9)
 
     if (env->FCX == 0) {
         /* FCU trap */
-       raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_FCU, GETPC());
+       tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_FCU, GETPC());
     }
 
     tmp_FCX = env->FCX;
@@ -2904,7 +2714,7 @@ void helper_bisr(CPUTriCoreState *env, uint32_t const9)
     new_FCX = cpu_ldl_le_data(env, ea);
     /* M(EA, 16 * word) = {PCXI, A[11], A[2], A[3], D[0], D[1], D[2], D[3], A[4]
                            , A[5], A[6], A[7], D[4], D[5], D[6], D[7]}; */
-    save_context_lower(env, ea);
+    tricore_store_context_lower(env, ea);
 
 
     /* PCXI.PCPN = ICR.CCPN */
@@ -2926,7 +2736,7 @@ void helper_bisr(CPUTriCoreState *env, uint32_t const9)
 
     if (tmp_FCX == env->LCX) {
         /* FCD trap */
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_FCD, GETPC());
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_FCD, GETPC());
     }
 }
 
@@ -2938,17 +2748,17 @@ void helper_rfe(CPUTriCoreState *env)
     /* if (PCXI[19: 0] == 0) then trap(CSU); */
     if ((env->PCXI & 0xfffff) == 0) {
         /* raise csu trap */
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_CSU, GETPC());
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_CSU, GETPC());
     }
     /* if (PCXI.UL == 0) then trap(CTYP); */
     if (pcxi_get_ul(env) == 0) {
         /* raise CTYP trap */
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_CTYP, GETPC());
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_CTYP, GETPC());
     }
     /* if (!cdc_zero() AND PSW.CDE) then trap(NEST); */
     if (!cdc_zero(&(env->PSW)) && (env->PSW & MASK_PSW_CDE)) {
         /* raise NEST trap */
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_NEST, GETPC());
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_NEST, GETPC());
     }
     env->PC = env->gpr_a[11] & ~0x1;
     /* ICR.IE = PCXI.PIE; */
@@ -2963,7 +2773,7 @@ void helper_rfe(CPUTriCoreState *env)
 
     /*{new_PCXI, PSW, A[10], A[11], D[8], D[9], D[10], D[11], A[12],
       A[13], A[14], A[15], D[12], D[13], D[14], D[15]} = M(EA, 16 * word); */
-    restore_context_upper(env, ea, &new_PCXI, &new_PSW);
+    tricore_load_context_upper(env, ea, &new_PCXI, &new_PSW);
     /* M(EA, word) = FCX;*/
     cpu_stl_le_data(env, ea, env->FCX);
     /* FCX[19: 0] = PCXI[19: 0]; */
@@ -2981,7 +2791,7 @@ void helper_rfe(CPUTriCoreState *env)
         env->PPRS = (get_field(new_PSW, MASK_PSW_PRS2) << 2) |
                     get_field(new_PSW, MASK_PSW_PRS);
     } else {
-    psw_write(env, new_PSW);
+        psw_write(env, new_PSW);
     }
 }
 
@@ -2990,16 +2800,17 @@ void helper_rfh(CPUTriCoreState *env)
     uint32_t ea;
     uint32_t new_PCXI;
     uint32_t new_PSW;
-
+    
     /* if (VCON1.CVMN != 0) then trap(PRIV); */
     /* if (VCON2.VMN == 0) then trap(OPD) */
     /* if (PCXI[19:0] == 0) then trap(CSU); */
     if ((env->PCXI & 0xfffff) == 0) {
         /* raise csu trap */
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_CSU, GETPC());
     }
     /* if (PCXI.UL == 0) then trap(CTYP); */
     if (pcxi_get_ul(env) == 0) {
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_CTYP, GETPC());
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_CTYP, GETPC());
     }
     /* if (!cdc_zero() AND PSW.CDE) then trap(NEST); */
     if (!cdc_zero(&(env->PSW)) && (env->PSW & MASK_PSW_CDE)) {
@@ -3012,9 +2823,9 @@ void helper_rfh(CPUTriCoreState *env)
     /* HRHV.ICR.CCPN = PCXI.PCPN; */
     /* EA = {PCXI.PCXS, 6'b0, PCXI.PCXO, 6'b0}; */
     ea = (pcxi_get_pcxs(env) << 28) |
-         (pcxi_get_pcxo(env) << 6);
+        (pcxi_get_pcxo(env) << 6);
     /* {new_PCXI, csa_PSW, A[10], A[11], D[8], D[9], D[10], D[11], A[12], A[13], A[14], A[15], D[12], D[13], D[14], D[15]} = M(EA, 16-word); */
-    restore_context_upper(env, ea, &new_PCXI, &new_PSW);
+    tricore_load_context_upper(env, ea, &new_PCXI, &new_PSW);
     /* M(EA, word) = HRHV.FCX; */
     cpu_stl_le_data(env, ea, env->FCX);
     /* HRHV.FCX[19:0] = PCXI[19:0]; */
@@ -3075,24 +2886,24 @@ void helper_ldlcx(CPUTriCoreState *env, uint32_t ea)
 {
     uint32_t dummy;
     /* insn doesn't load PCXI and RA */
-    restore_context_lower(env, ea, &dummy, &dummy);
+    tricore_load_context_lower(env, ea, &dummy, &dummy);
 }
 
 void helper_lducx(CPUTriCoreState *env, uint32_t ea)
 {
     uint32_t dummy;
     /* insn doesn't load PCXI and PSW */
-    restore_context_upper(env, ea, &dummy, &dummy);
+    tricore_load_context_upper(env, ea, &dummy, &dummy);
 }
 
 void helper_stlcx(CPUTriCoreState *env, uint32_t ea)
 {
-    save_context_lower(env, ea);
+    tricore_store_context_lower(env, ea);
 }
 
 void helper_stucx(CPUTriCoreState *env, uint32_t ea)
 {
-    save_context_upper(env, ea);
+    tricore_store_context_upper(env, ea);
 }
 
 void helper_svlcx(CPUTriCoreState *env)
@@ -3103,7 +2914,7 @@ void helper_svlcx(CPUTriCoreState *env)
 
     if (env->FCX == 0) {
         /* FCU trap */
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_FCU, GETPC());
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_FCU, GETPC());
     }
     /* tmp_FCX = FCX; */
     tmp_FCX = env->FCX;
@@ -3115,7 +2926,7 @@ void helper_svlcx(CPUTriCoreState *env)
     /* M(EA, 16 * word) = {PCXI, PSW, A[10], A[11], D[8], D[9], D[10], D[11],
                            A[12], A[13], A[14], A[15], D[12], D[13], D[14],
                            D[15]}; */
-    save_context_lower(env, ea);
+    tricore_store_context_lower(env, ea);
 
     /* PCXI.PCPN = ICR.CCPN; */
     pcxi_set_pcpn(env, icr_get_ccpn(env));
@@ -3134,7 +2945,7 @@ void helper_svlcx(CPUTriCoreState *env)
     /* if (tmp_FCX == LCX) trap(FCD);*/
     if (tmp_FCX == env->LCX) {
         /* FCD trap */
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_FCD, GETPC());
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_FCD, GETPC());
     }
 }
 
@@ -3146,7 +2957,7 @@ void helper_svucx(CPUTriCoreState *env)
 
     if (env->FCX == 0) {
         /* FCU trap */
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_FCU, GETPC());
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_FCU, GETPC());
     }
     /* tmp_FCX = FCX; */
     tmp_FCX = env->FCX;
@@ -3158,7 +2969,7 @@ void helper_svucx(CPUTriCoreState *env)
     /* M(EA, 16 * word) = {PCXI, PSW, A[10], A[11], D[8], D[9], D[10], D[11],
                            A[12], A[13], A[14], A[15], D[12], D[13], D[14],
                            D[15]}; */
-    save_context_upper(env, ea);
+    tricore_store_context_upper(env, ea);
 
     /* PCXI.PCPN = ICR.CCPN; */
     pcxi_set_pcpn(env, icr_get_ccpn(env));
@@ -3177,7 +2988,7 @@ void helper_svucx(CPUTriCoreState *env)
     /* if (tmp_FCX == LCX) trap(FCD);*/
     if (tmp_FCX == env->LCX) {
         /* FCD trap */
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_FCD, GETPC());
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_FCD, GETPC());
     }
 }
 
@@ -3188,12 +2999,12 @@ void helper_rslcx(CPUTriCoreState *env)
     /*   if (PCXI[19: 0] == 0) then trap(CSU); */
     if ((env->PCXI & 0xfffff) == 0) {
         /* CSU trap */
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_CSU, GETPC());
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_CSU, GETPC());
     }
     /* if (PCXI.UL == 1) then trap(CTYP); */
     if (pcxi_get_ul(env) == 1) {
         /* CTYP trap */
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_CTYP, GETPC());
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_CTYP, GETPC());
     }
     /* EA = {PCXI.PCXS, 6'b0, PCXI.PCXO, 6'b0}; */
     /* EA = {PCXI.PCXS, 6'b0, PCXI.PCXO, 6'b0}; */
@@ -3202,7 +3013,7 @@ void helper_rslcx(CPUTriCoreState *env)
 
     /* {new_PCXI, A[11], A[10], A[11], D[8], D[9], D[10], D[11], A[12],
         A[13], A[14], A[15], D[12], D[13], D[14], D[15]} = M(EA, 16 * word); */
-    restore_context_lower(env, ea, &env->gpr_a[11], &new_PCXI);
+    tricore_load_context_lower(env, ea, &env->gpr_a[11], &new_PCXI);
     /* M(EA, word) = FCX; */
     cpu_stl_le_data(env, ea, env->FCX);
     /* M(EA, word) = FCX; */

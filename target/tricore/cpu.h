@@ -24,26 +24,29 @@
 #include "hw/core/registerfields.h"
 #include "exec/cpu-common.h"
 #include "exec/cpu-defs.h"
+#include "hw/intc/tricore_ir.h"
 #include "qemu/cpu-float.h"
-#include "tricore-defs.h"
 
 #ifdef CONFIG_USER_ONLY
 #error "TriCore does not support user mode emulation"
 #endif
 
+struct tricore_boot_info;
+typedef struct tricore_def_t tricore_def_t;
+
 typedef struct CPUArchState {
     /* GPR Register */
     uint32_t gpr_a[16];
     uint32_t gpr_d[16];
-/* Frequently accessed PSW_USB bits are stored separately for efficiency.
-       This contains all the other bits.  Use psw_{read,write} to access
-       the whole PSW.  */
+    /* Frequently accessed PSW_USB bits are stored separately for efficiency.
+           This contains all the other bits.  Use psw_{read,write} to access
+           the whole PSW.  */
     uint32_t PSW;
     /* PSW flag cache for faster execution */
     uint32_t PSW_USB_C;
-    uint32_t PSW_USB_V;   /* Only if bit 31 set, then flag is set  */
-    uint32_t PSW_USB_SV;  /* Only if bit 31 set, then flag is set  */
-    uint32_t PSW_USB_AV;  /* Only if bit 31 set, then flag is set. */
+    uint32_t PSW_USB_V; /* Only if bit 31 set, then flag is set  */
+    uint32_t PSW_USB_SV; /* Only if bit 31 set, then flag is set  */
+    uint32_t PSW_USB_AV; /* Only if bit 31 set, then flag is set. */
     uint32_t PSW_USB_SAV; /* Only if bit 31 set, then flag is set. */
 
 #define R(ADDR, NAME, FEATURE) uint32_t NAME;
@@ -57,8 +60,8 @@ typedef struct CPUArchState {
     /* Floating Point Registers */
     float_status fp_status;
 
-    uint32_t irq_pending;
-    uint32_t reset_pending;
+    /* Trap Information Number */
+    uint8_t tin;
 
     /* Internal CPU feature flags.  */
     uint64_t features;
@@ -74,14 +77,27 @@ struct ArchCPU {
     CPUState parent_obj;
 
     CPUTriCoreState env;
+
+    TriCoreIRState *ir;
 };
+
+typedef struct TriCoreCPUInfo {
+    const char *name;
+    const char *deprecation_note;
+    void (*initfn)(Object *obj);
+    void (*class_init)(ObjectClass *oc, const void *data);
+} TriCoreCPUInfo;
 
 struct TriCoreCPUClass {
     CPUClass parent_class;
 
+    const TriCoreCPUInfo *info;
+
     DeviceRealize parent_realize;
     ResettablePhases parent_phases;
 };
+
+#define CPU_INTERRUPT_NMI CPU_INTERRUPT_TGT_EXT_0
 
 hwaddr tricore_cpu_get_phys_page_debug(CPUState *cpu, vaddr addr);
 void tricore_cpu_dump_state(CPUState *cpu, FILE *f, int flags);
@@ -356,6 +372,18 @@ enum {
     TIN7_NMI = 0,
 };
 
+#define EXCP_MMU TRAPC_MMU
+#define EXCP_PROT TRAPC_PROT
+#define EXCP_INSN_ERR TRAPC_INSN_ERR
+#define EXCP_CTX_MNG TRAPC_CTX_MNG
+#define EXCP_SYSBUS TRAPC_SYSBUS
+#define EXCP_ASSERT TRAPC_ASSERT
+#define EXCP_SYSCALL TRAPC_SYSCALL
+#define EXCP_NMI TRAPC_NMI
+#define EXCP_IRQ TRAPC_IRQ
+
+extern uint8_t variant;
+
 uint32_t psw_read(CPUTriCoreState *env);
 void psw_write(CPUTriCoreState *env, uint32_t val);
 int tricore_cpu_gdb_read_register(CPUState *cs, GByteArray *mem_buf, int n);
@@ -369,10 +397,19 @@ FIELD(TB_FLAGS, PRIV, 0, 2)
 
 void cpu_state_reset(CPUTriCoreState *s);
 void tricore_tcg_init(void);
-void tricore_translate_code(CPUState *cs, TranslationBlock *tb,
-                            int *max_insns, vaddr pc, void *host_pc);
+void tricore_translate_code(CPUState *cs, TranslationBlock *tb, int *max_insns,
+                            vaddr pc, void *host_pc);
+G_NORETURN void tricore_raise_exception(CPUTriCoreState *env, uint8_t tclass,
+                                        uint8_t tin, uintptr_t pc);
+bool tricore_cpu_exec_interrupt(CPUState *cs, int interrupt_request);
 void tricore_cpu_do_interrupt(CPUState *cs);
 void tricore_check_interrupts(CPUTriCoreState *cs);
+void tricore_store_context_upper(CPUTriCoreState *env, uint32_t ea);
+void tricore_store_context_lower(CPUTriCoreState *env, uint32_t ea);
+void tricore_load_context_upper(CPUTriCoreState *env, uint32_t ea,
+                                uint32_t *new_PCXI, uint32_t *new_PSW);
+void tricore_load_context_lower(CPUTriCoreState *env, uint32_t ea, uint32_t *ra,
+                                uint32_t *pcxi);
 
 static inline void cpu_get_tb_cpu_state(CPUTriCoreState *env, vaddr *pc,
                                         uint64_t *cs_base, uint32_t *flags)

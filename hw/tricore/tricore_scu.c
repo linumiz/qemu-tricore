@@ -272,8 +272,8 @@ static void tricore_scu_write(void *opaque, hwaddr offset, uint64_t value,
         
     case 0x60: /* SWRSTCON */
         if(value & 2) {
-            CPUTriCoreState *env = &((TriCoreCPU *) (s->cpu))->env;
-            env->reset_pending = 1;
+            //CPUTriCoreState *env = &((TriCoreCPU *) (s->cpu))->env;
+            //env->reset_pending = 1;
             
             qemu_log("tricore_scu_write: Software reset requested\n");
             qemu_irq_raise(s->reset_line);

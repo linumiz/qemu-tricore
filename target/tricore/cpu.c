@@ -18,14 +18,15 @@
  */
 
 #include "qemu/osdep.h"
+#include "hw/core/qdev-properties.h"
+#include "hw/core/qdev.h"
 #include "qapi/error.h"
 #include "cpu.h"
 #include "exec/cpu-interrupt.h"
 #include "exec/translation-block.h"
-#include "qemu/error-report.h"
 #include "tcg/debug-assert.h"
 #include "accel/tcg/cpu-ops.h"
-#include "qemu/log.h"
+#include "cpu-qom.h"
 
 static inline void set_feature(CPUTriCoreState *env, int feature)
 {
@@ -109,8 +110,11 @@ static void tricore_cpu_reset_hold(Object *obj, ResetType type)
 
 static bool tricore_cpu_has_work(CPUState *cs)
 {
-    return true;
-    //return cs->interrupt_request & CPU_INTERRUPT_HARD;
+    TriCoreCPU *cpu = TRICORE_CPU(cs);
+    CPUTriCoreState *env = &cpu->env;
+
+    return cpu_test_interrupt(cs, CPU_INTERRUPT_HARD | CPU_INTERRUPT_NMI) ||
+           (icr_get_ie(env) && FIELD_EX32(env->ICR, ICR, PIPN) != 0);
 }
 
 static int tricore_cpu_mmu_index(CPUState *cs, bool ifetch)
@@ -118,26 +122,8 @@ static int tricore_cpu_mmu_index(CPUState *cs, bool ifetch)
     return 0;
 }
 
-static bool tricore_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
+static void tricore_cpu_finalizefn(Object *obj)
 {
-    TriCoreCPU *cpu = TRICORE_CPU(cs);
-    CPUTriCoreState *env = &cpu->env;
-
-
-    if (env->reset_pending) {
-        qemu_log("tricore_cpu_exec_interrupt RESET\n");
-        cpu_state_reset(env);
-        env->reset_pending = 0;
-        return true;
-    }
-
-    if ((interrupt_request & CPU_INTERRUPT_HARD)
-            && (env->ICR & (MASK_ICR_IE_1_6)) >> 15) {
-        cs->exception_index = EXCP_IRQ;
-        tricore_cpu_do_interrupt(cs);
-        return true;
-    }
-    return false;
 }
 
 static void tricore_cpu_realizefn(DeviceState *dev, Error **errp)
@@ -176,6 +162,41 @@ static void tricore_cpu_realizefn(DeviceState *dev, Error **errp)
     qemu_init_vcpu(cs);
 
     tcc->parent_realize(dev, errp);
+}
+
+static void tricore_cpu_set_irq(void *opaque, int irq, int level)
+{
+    TriCoreCPU *cpu = TRICORE_CPU(opaque);
+    CPUTriCoreState *env = &cpu->env;
+    CPUState *cs = CPU(cpu);
+
+    if (level) {
+        env->ICR = FIELD_DP32(env->ICR, ICR, PIPN,
+                              FIELD_EX32(cpu->ir->lwsr[0], LWSR, PN));
+        cpu_interrupt(cs, CPU_INTERRUPT_HARD);
+    } else {
+        env->ICR = FIELD_DP32(env->ICR, ICR, PIPN, 0);
+        cpu_reset_interrupt(cs, CPU_INTERRUPT_HARD);
+    }
+}
+
+static void tricore_cpu_set_nmi(void* opaque, int irq, int level){
+    TriCoreCPU *cpu = TRICORE_CPU(opaque);
+    CPUState *cs = CPU(cpu);
+
+    if (level) {
+        cpu_interrupt(cs, CPU_INTERRUPT_NMI);
+    } else {
+        cpu_reset_interrupt(cs, CPU_INTERRUPT_NMI);
+    }
+}
+
+static void tricore_cpu_initfn(Object *obj)
+{
+    TriCoreCPU *cpu      = TRICORE_CPU(obj);
+
+    qdev_init_gpio_in_named(DEVICE(cpu), tricore_cpu_set_irq, "tricore.irq", 1);
+    qdev_init_gpio_in_named(DEVICE(cpu), tricore_cpu_set_nmi, "tricore.nmi", 1);
 }
 
 static ObjectClass *tricore_cpu_class_by_name(const char *cpu_model)
@@ -248,6 +269,10 @@ static const TCGCPUOps tricore_tcg_ops = {
     .do_interrupt = tricore_cpu_do_interrupt,
 };
 
+static const Property tricore_properties[] = {
+    DEFINE_PROP_LINK("ir", TriCoreCPU, ir, TYPE_TRICORE_IR, TriCoreIRState *),
+};
+
 static void tricore_cpu_class_init(ObjectClass *c, const void *data)
 {
     TriCoreCPUClass *mcc = TRICORE_CPU_CLASS(c);
@@ -255,9 +280,9 @@ static void tricore_cpu_class_init(ObjectClass *c, const void *data)
     DeviceClass *dc = DEVICE_CLASS(c);
     ResettableClass *rc = RESETTABLE_CLASS(c);
 
+    device_class_set_props(dc, tricore_properties);
     device_class_set_parent_realize(dc, tricore_cpu_realizefn,
                                     &mcc->parent_realize);
-
     resettable_class_set_parent_phases(rc, NULL, tricore_cpu_reset_hold, NULL,
                                        &mcc->parent_phases);
     cc->class_by_name = tricore_cpu_class_by_name;

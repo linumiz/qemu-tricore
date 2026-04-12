@@ -1,6 +1,7 @@
 tricore_ss = ss.source_set()
 tricore_ss.add(files(
   'cpu.c',
+  'cpu_helper.c',
   'fpu_helper.c',
   'helper.c',
   'op_helper.c',
