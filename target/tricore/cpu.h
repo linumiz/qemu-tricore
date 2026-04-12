@@ -411,6 +411,8 @@ void tricore_load_context_upper(CPUTriCoreState *env, uint32_t ea,
 void tricore_load_context_lower(CPUTriCoreState *env, uint32_t ea, uint32_t *ra,
                                 uint32_t *pcxi);
 
+void tricore_cpu_register(const TriCoreCPUInfo *info);
+
 static inline void cpu_get_tb_cpu_state(CPUTriCoreState *env, vaddr *pc,
                                         uint64_t *cs_base, uint32_t *flags)
 {
