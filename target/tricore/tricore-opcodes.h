@@ -207,6 +207,7 @@
 #define MASK_OP_RR_N(op)        MASK_BITS_SHIFT(op, 16, 17)
 #define MASK_OP_RR_S2(op)       MASK_BITS_SHIFT(op, 12, 15)
 #define MASK_OP_RR_S1(op)       MASK_OP_META_S1(op)
+#define MASK_OP_RR_OP2E(op)     ((MASK_BITS_SHIFT(op, 16, 17) << 8) | MASK_BITS_SHIFT(op, 20, 27))
 
 /* RR1  Format */
 #define MASK_OP_RR1_D(op)       MASK_OP_META_D(op)
@@ -236,6 +237,7 @@
 #define MASK_OP_RRR_N(op)       MASK_BITS_SHIFT(op, 16, 17)
 #define MASK_OP_RRR_S2(op)      MASK_BITS_SHIFT(op, 12, 15)
 #define MASK_OP_RRR_S1(op)      MASK_OP_META_S1(op)
+#define MASK_OP_RRR_OP2E(op)    ((MASK_BITS_SHIFT(op, 16, 17) << 4) | MASK_BITS_SHIFT(op, 20, 23))
 
 /* RRR1  Format */
 #define MASK_OP_RRR1_D(op)      MASK_OP_META_D(op)
@@ -504,12 +506,14 @@ enum {
     OPC1_32_RLC_ADDIH                                = 0x9b,
     OPC1_32_RLC_ADDIH_A                              = 0x11,
     OPC1_32_RLC_MFCR                                 = 0x4d,
+    OPC1_32_RLC_MFDCR                                = 0x4f, /* 1.8 only */
     OPC1_32_RLC_MOV                                  = 0x3b,
     OPC1_32_RLC_MOV_64                               = 0xfb, /* 1.6 only */
     OPC1_32_RLC_MOV_U                                = 0xbb,
     OPC1_32_RLC_MOV_H                                = 0x7b,
     OPC1_32_RLC_MOVH_A                               = 0x91,
     OPC1_32_RLC_MTCR                                 = 0xcd,
+    OPC1_32_RLC_MTDCR                                = 0xcf, /* 1.8 only */
 /* RR Format */
     OPCM_32_RR_LOGICAL_SHIFT                         = 0x0f,
     OPCM_32_RR_ACCUMULATOR                           = 0x0b,
@@ -692,6 +696,9 @@ enum {
     OPC2_32_BO_ST_W_SHORTOFF                     = 0x24,
     OPC2_32_BO_ST_W_POSTINC                      = 0x04,
     OPC2_32_BO_ST_W_PREINC                       = 0x14,
+    OPC2_32_BO_ST_DD_SHORTOFF                    = 0x29, /* >=TC18 */
+    OPC2_32_BO_ST_DD_POSTINC                     = 0x09, /* >=TC18 */
+    OPC2_32_BO_ST_DD_PREINC                      = 0x19, /* >=TC18 */
 };
 /* OPCM_32_BO_ADDRMODE_BITREVERSE_CIRCULAR   */
 enum {
@@ -745,6 +752,9 @@ enum {
     OPC2_32_BO_LD_W_SHORTOFF                     = 0x24,
     OPC2_32_BO_LD_W_POSTINC                      = 0x04,
     OPC2_32_BO_LD_W_PREINC                       = 0x14,
+    OPC2_32_BO_LD_DD_SHORTOFF                    = 0x29, /* >=TC18 */
+    OPC2_32_BO_LD_DD_POSTINC                     = 0x09, /* >=TC18 */
+    OPC2_32_BO_LD_DD_PREINC                      = 0x19, /* >=TC18 */
 };
 /* OPCM_32_BO_ADDRMODE_LD_BITREVERSE_CIRCULAR  */
 enum {
@@ -786,6 +796,24 @@ enum {
     OPC2_32_BO_SWAPMSK_W_SHORTOFF                = 0x22,
     OPC2_32_BO_SWAPMSK_W_POSTINC                 = 0x02,
     OPC2_32_BO_SWAPMSK_W_PREINC                  = 0x12,
+    OPC2_32_BO_CACHEA_I_VM_SHORTOFF              = 0x2e, /* >=TC18 */
+    OPC2_32_BO_CACHEA_I_VM_POSTINC               = 0x0e, /* >=TC18 */
+    OPC2_32_BO_CACHEA_I_VM_PREINC                = 0x1e, /* >=TC18 */
+    OPC2_32_BO_CACHEA_W_VM_SHORTOFF              = 0x2c, /* >=TC18 */
+    OPC2_32_BO_CACHEA_W_VM_POSTINC               = 0x0c, /* >=TC18 */
+    OPC2_32_BO_CACHEA_W_VM_PREINC                = 0x1c, /* >=TC18 */
+    OPC2_32_BO_CACHEA_WI_VM_SHORTOFF             = 0x2d, /* >=TC18 */
+    OPC2_32_BO_CACHEA_WI_VM_POSTINC              = 0x0d, /* >=TC18 */
+    OPC2_32_BO_CACHEA_WI_VM_PREINC               = 0x1d, /* >=TC18 */
+    OPC2_32_BO_CACHEI_I_VM_SHORTOFF              = 0x2a, /* >=TC18 */
+    OPC2_32_BO_CACHEI_I_VM_POSTINC               = 0x0a, /* >=TC18 */
+    OPC2_32_BO_CACHEI_I_VM_PREINC                = 0x1a, /* >=TC18 */
+    OPC2_32_BO_CACHEI_W_VM_SHORTOFF              = 0x2b, /* >=TC18 */
+    OPC2_32_BO_CACHEI_W_VM_POSTINC               = 0x0b, /* >=TC18 */
+    OPC2_32_BO_CACHEI_W_VM_PREINC                = 0x1b, /* >=TC18 */
+    OPC2_32_BO_CACHEI_WI_VM_SHORTOFF             = 0x2f, /* >=TC18 */
+    OPC2_32_BO_CACHEI_WI_VM_POSTINC              = 0x0f, /* >=TC18 */
+    OPC2_32_BO_CACHEI_WI_VM_PREINC               = 0x1f, /* >=TC18 */
 };
 /*OPCM_32_BO_ADDRMODE_LDMST_BITREVERSE_CIRCULAR  */
 enum {
@@ -940,6 +968,7 @@ enum {
 enum {
     OPC2_32_RC_BISR                              = 0x00,
     OPC2_32_RC_SYSCALL                           = 0x04,
+    OPC2_32_RC_HVCALL                            = 0x02,  /* >=TC18 */
 };
 /* OPCM_32_RC_MUL                                   */
 enum {
@@ -1130,38 +1159,71 @@ enum {
 };
 /* OPCM_32_RR_FLOAT                                 */
 enum {
-    OPC2_32_RR_BMERGE                            = 0x01,
-    OPC2_32_RR_BSPLIT                            = 0x09,
-    OPC2_32_RR_DVINIT_B                          = 0x5a,
-    OPC2_32_RR_DVINIT_BU                         = 0x4a,
-    OPC2_32_RR_DVINIT_H                          = 0x3a,
-    OPC2_32_RR_DVINIT_HU                         = 0x2a,
-    OPC2_32_RR_DVINIT                            = 0x1a,
-    OPC2_32_RR_DVINIT_U                          = 0x0a,
-    OPC2_32_RR_PARITY                            = 0x02,
-    OPC2_32_RR_UNPACK                            = 0x08,
-    OPC2_32_RR_CRC32                             = 0x03, /* CRC32B.W in 1.6.2 */
-    OPC2_32_RR_CRC32_B                           = 0x06, /* 1.6.2 only */
-    OPC2_32_RR_CRC32L_W                          = 0x07, /* 1.6.2 only */
-    OPC2_32_RR_POPCNT_W                          = 0x22, /* 1.6.2 only */
-    OPC2_32_RR_DIV                               = 0x20,
-    OPC2_32_RR_DIV_U                             = 0x21,
-    OPC2_32_RR_MUL_F                             = 0x04,
-    OPC2_32_RR_DIV_F                             = 0x05,
-    OPC2_32_RR_FTOI                              = 0x10,
-    OPC2_32_RR_ITOF                              = 0x14,
-    OPC2_32_RR_CMP_F                             = 0x00,
-    OPC2_32_RR_FTOIZ                             = 0x13,
-    OPC2_32_RR_FTOHP                             = 0x25, /* 1.6.2 only */
-    OPC2_32_RR_HPTOF                             = 0x24, /* 1.6.2 only */
-    OPC2_32_RR_FTOQ31                            = 0x11,
-    OPC2_32_RR_FTOQ31Z                           = 0x18,
-    OPC2_32_RR_FTOU                              = 0x12,
-    OPC2_32_RR_FTOUZ                             = 0x17,
-    OPC2_32_RR_Q31TOF                            = 0x15,
-    OPC2_32_RR_QSEED_F                           = 0x19,
-    OPC2_32_RR_UPDFL                             = 0x0c,
-    OPC2_32_RR_UTOF                              = 0x16,
+    OPC2_32_RR_BMERGE                            = 0x001,
+    OPC2_32_RR_BSPLIT                            = 0x009,
+    OPC2_32_RR_DVINIT_B                          = 0x05a,
+    OPC2_32_RR_DVINIT_BU                         = 0x04a,
+    OPC2_32_RR_DVINIT_H                          = 0x03a,
+    OPC2_32_RR_DVINIT_HU                         = 0x02a,
+    OPC2_32_RR_DVINIT                            = 0x01a,
+    OPC2_32_RR_DVINIT_U                          = 0x00a,
+    OPC2_32_RR_PARITY                            = 0x002,
+    OPC2_32_RR_UNPACK                            = 0x008,
+    OPC2_32_RR_CRC32                             = 0x003, /* CRC32B.W in 1.6.2 */
+    OPC2_32_RR_CRC32_B                           = 0x006, /* 1.6.2 only */
+    OPC2_32_RR_CRC32L_W                          = 0x007, /* 1.6.2 only */
+    OPC2_32_RR_POPCNT_W                          = 0x022, /* 1.6.2 only */
+    OPC2_32_RR_DIV                               = 0x120,
+    OPC2_32_RR_DIV_U                             = 0x121,
+    OPC2_32_RR_DIV64                             = 0x220, /* >=TC18 */
+    OPC2_32_RR_DIV64_U                           = 0x221, /* >=TC18 */
+    OPC2_32_RR_REM64                             = 0x234, /* >=TC18 */
+    OPC2_32_RR_REM64_U                           = 0x235, /* >=TC18 */
+    OPC2_32_RR_MUL_F                             = 0x104,
+    OPC2_32_RR_DIV_F                             = 0x105,
+    OPC2_32_RR_FTOI                              = 0x110,
+    OPC2_32_RR_ITOF                              = 0x114,
+    OPC2_32_RR_CMP_F                             = 0x100,
+    OPC2_32_RR_FTOIZ                             = 0x113,
+    OPC2_32_RR_FTOHP                             = 0x125, /* 1.6.2 only */
+    OPC2_32_RR_HPTOF                             = 0x124, /* 1.6.2 only */
+    OPC2_32_RR_FTOQ31                            = 0x111,
+    OPC2_32_RR_FTOQ31Z                           = 0x118,
+    OPC2_32_RR_FTOU                              = 0x112,
+    OPC2_32_RR_FTOUZ                             = 0x117,
+    OPC2_32_RR_Q31TOF                            = 0x115,
+    OPC2_32_RR_QSEED_F                           = 0x119,
+    OPC2_32_RR_UPDFL                             = 0x10c,
+    OPC2_32_RR_UTOF                              = 0x116,
+    OPC2_32_RR_ABS_F                             = 0x130, /* >=TC18 */
+    OPC2_32_RR_ABS_DF                            = 0x230, /* >=TC18 */
+    OPC2_32_RR_CMP_DF                            = 0x200, /* >=TC18 */
+    OPC2_32_RR_DFTOF                             = 0x228, /* >=TC18 */
+    OPC2_32_RR_DFTOI                             = 0x210, /* >=TC18 */
+    OPC2_32_RR_DFTOIN                            = 0x237, /* >=TC18 */
+    OPC2_32_RR_DFTOIZ                            = 0x213, /* >=TC18 */
+    OPC2_32_RR_DFTOU                             = 0x212, /* >=TC18 */
+    OPC2_32_RR_DFTOUZ                            = 0x217, /* >=TC18 */
+    OPC2_32_RR_DFTOL                             = 0x21A, /* >=TC18 */
+    OPC2_32_RR_DFTOLZ                            = 0x21B, /* >=TC18 */
+    OPC2_32_RR_DFTOUL                            = 0x21E, /* >=TC18 */
+    OPC2_32_RR_DFTOULZ                           = 0x21F, /* >=TC18 */
+    OPC2_32_RR_DIV_DF                            = 0x205, /* >=TC18 */
+    OPC2_32_RR_FTODF                             = 0x229, /* >=TC18 */
+    OPC2_32_RR_FTOIN                             = 0x137, /* >=TC18 */
+    OPC2_32_RR_MUL_DF                            = 0x204, /* >=TC18 */
+    OPC2_32_RR_MULP_B                            = 0x02B, /* >=TC18 */
+    OPC2_32_RR_NEG_DF                            = 0x231, /* >=TC18 */
+    OPC2_32_RR_NEG_F                             = 0x131, /* >=TC18 */
+    OPC2_32_RR_QSEED_DF                          = 0x219, /* >=TC18 */
+    OPC2_32_RR_ULTODF                            = 0x227, /* >=TC18 */
+    OPC2_32_RR_LTODF                             = 0x226, /* >=TC18 */
+    OPC2_32_RR_ITODF                             = 0x214, /* >=TC18 */
+    OPC2_32_RR_UTODF                             = 0x216, /* >=TC18 */
+    OPC2_32_RR_MAX_DF                            = 0x232, /* >=TC18 */
+    OPC2_32_RR_MAX_F                             = 0x132, /* >=TC18 */
+    OPC2_32_RR_MIN_DF                            = 0x233, /* >=TC18 */
+    OPC2_32_RR_MIN_F                             = 0x133, /* >=TC18 */
 };
 /* OPCM_32_RR_IDIRECT                               */
 enum {
@@ -1169,6 +1231,7 @@ enum {
     OPC2_32_RR_JLI                               = 0x02,
     OPC2_32_RR_CALLI                             = 0x00,
     OPC2_32_RR_FCALLI                            = 0x01,
+    OPC2_32_RR_JRI                               = 0x13, /* >=TC18 */
 };
 /*
  * RR1 Format
@@ -1245,11 +1308,15 @@ enum {
     OPC2_32_RRR_IXMIN                            = 0x08,
     OPC2_32_RRR_IXMIN_U                          = 0x09,
     OPC2_32_RRR_PACK                             = 0x00,
-    OPC2_32_RRR_ADD_F                            = 0x02,
-    OPC2_32_RRR_SUB_F                            = 0x03,
-    OPC2_32_RRR_MADD_F                           = 0x06,
-    OPC2_32_RRR_MSUB_F                           = 0x07,
-    OPC2_32_RRR_CRCN                             = 0x01, /* 1.6.2 up */
+    OPC2_32_RRR_ADD_F                            = 0x12,
+    OPC2_32_RRR_SUB_F                            = 0x13,
+    OPC2_32_RRR_MADD_F                           = 0x16,
+    OPC2_32_RRR_MSUB_F                           = 0x17,
+    OPC2_32_RRR_CRCN                             = 0x01,  /*>=TC162*/
+    OPC2_32_RRR_ADD_DF                           = 0x22,  /*>=TC18 */
+    OPC2_32_RRR_SUB_DF                           = 0x23,  /*>=TC18 */
+    OPC2_32_RRR_MADD_DF                          = 0x26,  /*>=TC18 */
+    OPC2_32_RRR_MSUB_DF                          = 0x27,  /*>=TC18 */
 };
 /*
  * RRR1 Format
@@ -1474,18 +1541,18 @@ enum {
     OPC2_32_SYS_DSYNC                            = 0x12,
     OPC2_32_SYS_ENABLE                           = 0x0c,
     OPC2_32_SYS_ISYNC                            = 0x13,
-    OPC2_32_SYS_WAIT                             = 0x16,
     OPC2_32_SYS_NOP                              = 0x00,
     OPC2_32_SYS_RET                              = 0x06,
     OPC2_32_SYS_RFE                              = 0x07,
     OPC2_32_SYS_RFM                              = 0x05,
     OPC2_32_SYS_RSLCX                            = 0x09,
     OPC2_32_SYS_SVLCX                            = 0x08,
+    OPC2_32_SYS_WAIT                             = 0x16,  /* >=TC161 */
     OPC2_32_SYS_TRAPSV                           = 0x15,
     OPC2_32_SYS_TRAPV                            = 0x14,
-    OPC2_32_SYS_RFH                              = 0x17,
     OPC2_32_SYS_RESTORE                          = 0x0e,
     OPC2_32_SYS_FRET                             = 0x03,
+    OPC2_32_SYS_RFH                              = 0x17,  /* >=TC18 */
 };
 
 #endif

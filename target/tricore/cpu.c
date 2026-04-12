@@ -34,6 +34,14 @@ static inline void set_feature(CPUTriCoreState *env, int feature)
 
 static const gchar *tricore_gdb_arch_name(CPUState *cs)
 {
+    TriCoreCPU *cpu = TRICORE_CPU(cs);
+    CPUTriCoreState *env = &cpu->env;
+    if (tricore_has_feature(env, TRICORE_FEATURE_18))  return g_strdup("TriCore:V1_8");
+    if (tricore_has_feature(env, TRICORE_FEATURE_162)) return g_strdup("TriCore:V1_6_2");
+    if (tricore_has_feature(env, TRICORE_FEATURE_161)) return g_strdup("TriCore:V1_6_1");
+    if (tricore_has_feature(env, TRICORE_FEATURE_16)) return g_strdup("TriCore:V1_6");
+    if (tricore_has_feature(env, TRICORE_FEATURE_131)) return g_strdup("TriCore:V1_3_1");
+    if (tricore_has_feature(env, TRICORE_FEATURE_13)) return g_strdup("TriCore:V1_3");
     return "tricore";
 }
 
@@ -75,6 +83,22 @@ static void tricore_cpu_reset_hold(Object *obj, ResetType type)
 {
     CPUState *cs = CPU(obj);
     TriCoreCPUClass *tcc = TRICORE_CPU_GET_CLASS(obj);
+
+    TriCoreCPU *cpu = TRICORE_CPU(obj);
+    CPUTriCoreState *env = &cpu->env;
+
+    /* FORCE BIV to your linked address (0x80000100) */
+    env->BIV = 0x80000100; 
+
+    /* FORCE FCX to a valid CSA memory block (0xD000A000) */
+    /* This prevents the "Upper Context Save" crash in do_interrupt */
+    env->FCX = 0x000D0280; // Example Link Word for 0xD000A000
+    
+    /* FORCE ISP (Interrupt Stack) */
+    env->ISP = 0xD0008000;
+
+    /* Ensure Interrupts are globally enabled in PSW */
+    env->PSW |= MASK_PSW_IE; 
 
     if (tcc->parent_phases.hold) {
         tcc->parent_phases.hold(obj, type);
@@ -131,6 +155,9 @@ static void tricore_cpu_realizefn(DeviceState *dev, Error **errp)
     }
 
     /* Some features automatically imply others */
+    if (tricore_has_feature(env, TRICORE_FEATURE_18)) {
+        set_feature(env, TRICORE_FEATURE_162);
+    }
     if (tricore_has_feature(env, TRICORE_FEATURE_162)) {
         set_feature(env, TRICORE_FEATURE_161);
     }
@@ -155,9 +182,14 @@ static ObjectClass *tricore_cpu_class_by_name(const char *cpu_model)
 {
     ObjectClass *oc;
     char *typename;
+    char **cpuname;
+    const char *cpunamestr;
 
-    typename = g_strdup_printf(TRICORE_CPU_TYPE_NAME("%s"), cpu_model);
+    cpuname = g_strsplit(cpu_model, ",", 1);
+    cpunamestr = cpuname[0];
+    typename = g_strdup_printf(TRICORE_CPU_TYPE_NAME("%s"), cpunamestr);
     oc = object_class_by_name(typename);
+    g_strfreev(cpuname);
     g_free(typename);
 
     return oc;

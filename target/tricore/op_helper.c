@@ -16,12 +16,15 @@
  */
 #include "qemu/osdep.h"
 #include "cpu.h"
+#include "exec/cpu-common.h"
 #include "qemu/log.h"
 #include "qemu/host-utils.h"
 #include "exec/cpu-interrupt.h"
 #include "exec/helper-proto.h"
 #include "accel/tcg/cpu-ldst.h"
 #include "qemu/plugin.h"
+#include "qemu/typedefs.h"
+#include "target/riscv/cpu_bits.h"
 #include <zlib.h> /* for crc32 */
 
 
@@ -2207,6 +2210,98 @@ uint64_t helper_divide_u(CPUTriCoreState *env, uint32_t r1, uint32_t r2)
     return ((uint64_t)remainder << 32) | quotient;
 }
 
+uint64_t helper_divide64(CPUTriCoreState *env, uint64_t r1, uint64_t r2)
+{
+    int64_t quotient, remainder;
+    int64_t dividend = (int64_t)r1;
+    int64_t divisor = (int64_t)r2;
+
+    if (divisor == 0) {
+        if (dividend >= 0) {
+            quotient = 0x7fffffffffffffff;
+            remainder = 0;
+        } else {
+            quotient = 0x8000000000000000;
+            remainder = 0;
+        }
+        env->PSW_USB_V = (1 << 31);
+    } else if ((divisor == 0xffffffffffffffff) && (dividend == 0x8000000000000000)) {
+        quotient = 0x7fffffffffffffff;
+        remainder = 0;
+        env->PSW_USB_V = (1 << 31);
+    } else {
+        remainder = dividend % divisor;
+        quotient = (dividend - remainder)/divisor;
+        env->PSW_USB_V = 0;
+    }
+    env->PSW_USB_SV |= env->PSW_USB_V;
+    env->PSW_USB_AV = 0;
+    return (uint64_t)quotient;
+}
+
+uint64_t helper_reminder64(CPUTriCoreState *env, uint64_t r1, uint64_t r2)
+{
+    int64_t remainder;
+    int64_t dividend = (int64_t)r1;
+    int64_t divisor = (int64_t)r2;
+
+    if (divisor == 0) {
+        if (dividend >= 0) {
+            remainder = 0;
+        } else {
+            remainder = 0;
+        }
+        env->PSW_USB_V = (1 << 31);
+    } else if ((divisor == 0xffffffffffffffff) && (dividend == 0x8000000000000000)) {
+        remainder = 0;
+        env->PSW_USB_V = (1 << 31);
+    } else {
+        remainder = dividend % divisor;
+        env->PSW_USB_V = 0;
+    }
+    env->PSW_USB_SV |= env->PSW_USB_V;
+    env->PSW_USB_AV = 0;
+    return (uint64_t)remainder;
+}
+
+uint64_t helper_divide64_u(CPUTriCoreState *env, uint64_t r1, uint64_t r2)
+{
+    uint64_t quotient, remainder;
+    uint64_t dividend = r1;
+    uint64_t divisor = r2;
+
+    if (divisor == 0) {
+        quotient = 0xffffffffffffffff;
+        remainder = 0;
+        env->PSW_USB_V = (1 << 31);
+    } else {
+        remainder = dividend % divisor;
+        quotient = (dividend - remainder)/divisor;
+        env->PSW_USB_V = 0;
+    }
+    env->PSW_USB_SV |= env->PSW_USB_V;
+    env->PSW_USB_AV = 0;
+    return (uint64_t)quotient;
+}
+
+uint64_t helper_reminder64_u(CPUTriCoreState *env, uint64_t r1, uint64_t r2)
+{
+    uint64_t remainder;
+    uint64_t dividend = r1;
+    uint64_t divisor = r2;
+
+    if (divisor == 0) {
+        remainder = 0;
+        env->PSW_USB_V = (1 << 31);
+    } else {
+        remainder = dividend % divisor;
+        env->PSW_USB_V = 0;
+    }
+    env->PSW_USB_SV |= env->PSW_USB_V;
+    env->PSW_USB_AV = 0;
+    return (uint64_t)remainder;
+}
+
 uint64_t helper_mul_h(uint32_t arg00, uint32_t arg01,
                       uint32_t arg10, uint32_t arg11, uint32_t n)
 {
@@ -2397,6 +2492,21 @@ uint32_t helper_shuffle(uint32_t arg0, uint32_t arg1)
           | ((res & 0x11111111) << 3);
     }
 
+    return res;
+}
+
+uint64_t helper_mulp_b(uint32_t arg0, uint32_t arg1)
+{
+	uint64_t res;
+	uint64_t tmp;
+    tmp=((arg0 & 0xFF) * (arg1 & 0xFF)) & 0xFFFF;
+    res=tmp;
+    tmp=(((arg0>>8) & 0xFF) * ((arg1>>8) & 0xFF)) & 0xFFFF;
+    res|=tmp<<16;
+    tmp=(((arg0>>16) & 0xFF) * ((arg1>>16) & 0xFF)) & 0xFFFF;
+    res|=tmp<<32;
+    tmp=(((arg0>>24) & 0xFF) * ((arg1>>24) & 0xFF)) & 0xFFFF;
+    res|=tmp<<48;
     return res;
 }
 
@@ -2759,7 +2869,15 @@ void helper_ret(CPUTriCoreState *env)
     /* PCXI = new_PCXI; */
     env->PCXI = new_PCXI;
 
-    if (tricore_has_feature(env, TRICORE_FEATURE_131)) {
+    if (tricore_has_feature(env, TRICORE_FEATURE_18)) {
+        /* PSW = {csa_PSW[31:26], PSW[25:24], csa_PSW[23:16], PPRS[2], csa_PSW[14], PPRS[1:0], csa_PSW[11:0]}; */
+        psw_write(env, (new_PSW & 0xFCFF4FFF) | (psw & (0x3000000)) |
+                           (get_field(env->PPRS, 0x4) << 15) |
+                           (get_field(env->PPRS, 0x3) << 12));
+        /* PPRS = {csa_PSW.PRS[2], csa_PSW.PRS[1:0]}; */
+        env->PPRS = (get_field(new_PSW, MASK_PSW_PRS2) << 2) |
+                    get_field(new_PSW, MASK_PSW_PRS);
+    } else if (tricore_has_feature(env, TRICORE_FEATURE_131)) {
         /* PSW = {new_PSW[31:26], PSW[25:24], new_PSW[23:0]}; */
         psw_write(env, (new_PSW & ~(0x3000000)) + (psw & (0x3000000)));
     } else { /* TRICORE_FEATURE_13 only */
@@ -2853,7 +2971,18 @@ void helper_rfe(CPUTriCoreState *env)
     /* PCXI = new_PCXI; */
     env->PCXI = new_PCXI;
     /* write psw */
+    if (tricore_has_feature(env, TRICORE_FEATURE_18)) {
+        /* PSW = {csa_PSW[31:16], PPRS[2], csa_PSW[14], PPRS[1:0],
+         * csa_PSW[11:0]}; */
+        psw_write(env, (new_PSW & 0xFFFF4FFF) |
+                           (get_field(env->PPRS, 0x4) << 15) |
+                           (get_field(env->PPRS, 0x3) << 12));
+        /* PPRS = {csa_PSW.PRS[2], csa_PSW.PRS[1:0]}; */
+        env->PPRS = (get_field(new_PSW, MASK_PSW_PRS2) << 2) |
+                    get_field(new_PSW, MASK_PSW_PRS);
+    } else {
     psw_write(env, new_PSW);
+    }
 }
 
 void helper_rfh(CPUTriCoreState *env)
@@ -2862,49 +2991,66 @@ void helper_rfh(CPUTriCoreState *env)
     uint32_t new_PCXI;
     uint32_t new_PSW;
 
+    /* if (VCON1.CVMN != 0) then trap(PRIV); */
+    /* if (VCON2.VMN == 0) then trap(OPD) */
+    /* if (PCXI[19:0] == 0) then trap(CSU); */
     if ((env->PCXI & 0xfffff) == 0) {
-        raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_CSU, GETPC());
+        /* raise csu trap */
     }
+    /* if (PCXI.UL == 0) then trap(CTYP); */
     if (pcxi_get_ul(env) == 0) {
         raise_exception_sync_helper(env, TRAPC_CTX_MNG, TIN3_CTYP, GETPC());
     }
-
+    /* if (!cdc_zero() AND PSW.CDE) then trap(NEST); */
+    if (!cdc_zero(&(env->PSW)) && (env->PSW & MASK_PSW_CDE)) {
+        /* raise NEST trap */
+        tricore_raise_exception(env, TRAPC_CTX_MNG, TIN3_NEST, GETPC());
+    }
+    /* new_PC = {A[11] [31:1], 1'b0}; */
     env->PC = env->gpr_a[11] & ~0x1;
-
+    /* HRHV.ICR.IE = PCXI.PIE; */
+    /* HRHV.ICR.CCPN = PCXI.PCPN; */
+    /* EA = {PCXI.PCXS, 6'b0, PCXI.PCXO, 6'b0}; */
     ea = (pcxi_get_pcxs(env) << 28) |
          (pcxi_get_pcxo(env) << 6);
-
+    /* {new_PCXI, csa_PSW, A[10], A[11], D[8], D[9], D[10], D[11], A[12], A[13], A[14], A[15], D[12], D[13], D[14], D[15]} = M(EA, 16-word); */
     restore_context_upper(env, ea, &new_PCXI, &new_PSW);
-
+    /* M(EA, word) = HRHV.FCX; */
     cpu_stl_le_data(env, ea, env->FCX);
-    env->FCX = (env->FCX & 0xfff00000) + (env->PCXI & 0x000fffff);
+    /* HRHV.FCX[19:0] = PCXI[19:0]; */
+    env->FCX = (env->PCXI & 0xfff00000) + (env->PCXI & 0x000fffff);
+    /* PCXI = new_PCXI; */
     env->PCXI = new_PCXI;
-    psw_write(env, new_PSW);
-    icr_set_ie(env, 0);
-    icr_set_ccpn(env, 0);
+    /* PSW = {csa_PSW[31:16], PPRS[2], csa_PSW[14], PPRS[1:0], csa_PSW[11:0]}; */
+    psw_write(env, (new_PSW & 0xFFFF4FFF) |
+                       (get_field(env->PPRS, 0x4) << 15) |
+                       (get_field(env->PPRS, 0x3) << 12));
+    /* PPRS = {csa_PSW.PRS[2], csa_PSW.PRS[1:0]}; */
+    env->PPRS = (get_field(new_PSW, MASK_PSW_PRS2) << 2) |
+                get_field(new_PSW, MASK_PSW_PRS);
+    /* VCON1.CVMN = VCON2.VMN */
+    /* HRHV MPU now acting as Level 2 MPU using VCON2.L2_PRS
+    if (VCON1.CVMN == 1)
+        Current hardware resource = HRA
+    else
+        Current hardware resource = HRB */
 }
 
-#if 1
-void helper_wait(CPUTriCoreState *env)
-{
-    cpu_loop_exit(env_cpu(env));
-}
-
-#else
 void helper_wait(CPUTriCoreState *env)
 {
     CPUState *cs = env_cpu(env);
 
-    if (cs->interrupt_request & CPU_INTERRUPT_HARD) {
+    if (cpu_has_work(cs)) {
+        /* Don't bother to go into our "low power state" if
+         * we would just wake up immediately.
+         */
         return;
     }
 
-    //error_report("WAIT: halting CPU");
-    cs->halted = 1;
     cs->exception_index = EXCP_HLT;
+    cs->halted = 1;
     cpu_loop_exit(cs);
 }
-#endif
 
 void helper_rfm(CPUTriCoreState *env)
 {

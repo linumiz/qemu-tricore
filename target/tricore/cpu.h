@@ -115,8 +115,6 @@ uint32_t icr_get_pipn(CPUTriCoreState *env);
 void icr_set_ccpn(CPUTriCoreState *env, uint32_t val);
 void icr_set_ie(CPUTriCoreState *env, uint32_t val);
 
-#define EXCP_IRQ      2
-
 #define MASK_PSW_USB 0xff000000
 #define MASK_USB_C   0x80000000
 #define MASK_USB_V   0x40000000
@@ -131,6 +129,8 @@ void icr_set_ie(CPUTriCoreState *env, uint32_t val);
 #define MASK_PSW_CDC 0x0000007f
 #define MASK_PSW_FPU_RM 0x3000000
 #define MASK_PSW_S 0x00004000
+#define MASK_PSW_IE 0x00000100
+#define MASK_PSW_PRS2 0x00008000
 
 #define MASK_SYSCON_PRO_TEN 0x2
 #define MASK_SYSCON_FCD_SF  0x1
@@ -154,14 +154,58 @@ void icr_set_ie(CPUTriCoreState *env, uint32_t val);
 #define MASK_DBGSR_EVTSRC 0x1f00
 
 #define BITPOS_ICR_IE_1_3 8
-#define BITPOS_ICR_IE_1_6 15
+#define BITPOS_ICR_IE_1_8 15
 #define MASK_ICR_PIPN 0x00ff0000
-#define MASK_ICR_IE_1_3   (1U << BITPOS_ICR_IE_1_3)
-#define MASK_ICR_IE_1_6   (1U << BITPOS_ICR_IE_1_6)
+#define MASK_ICR_IE_1_3 (1U << BITPOS_ICR_IE_1_3)
+#define MASK_ICR_IE_1_8 (1U << BITPOS_ICR_IE_1_8)
 #define MASK_ICR_CCPN 0x000000ff
 
 #define MASK_BIV_VSS 0x00000001
 #define MASK_BIV_BIV 0xFFFFFFFE
+
+#define MASK_PSW_USB 0xff000000
+#define MASK_USB_BIT31 0x80000000
+#define MASK_USB_BIT30 0x40000000
+#define MASK_USB_BIT29 0x20000000
+#define MASK_USB_BIT28 0x10000000
+#define MASK_USB_BIT27 0x08000000
+#define MASK_USB_BIT26 0x04000000
+#define MASK_USB_BIT25 0x02000000
+#define MASK_USB_BIT24 0x01000000
+#define MASK_PSW_PRS 0x00003000
+#define MASK_PSW_IO 0x00000c00
+#define MASK_PSW_IS 0x00000200
+#define MASK_PSW_GW 0x00000100
+#define MASK_PSW_CDE 0x00000080
+#define MASK_PSW_CDC 0x0000007f
+#define MASK_PSW_FPU_RM 0x3000000
+
+#define MASK_SYSCON_PRO_TEN 0x2
+#define MASK_SYSCON_FCD_SF 0x1
+
+#define MASK_CPUID_MOD 0xffff0000
+#define MASK_CPUID_MOD_32B 0x0000ff00
+#define MASK_CPUID_REV 0x000000ff
+
+
+#define MASK_FCX_FCXS 0x000f0000
+#define MASK_FCX_FCXO 0x0000ffff
+
+#define MASK_LCX_LCXS 0x000f0000
+#define MASK_LCX_LCX0 0x0000ffff
+
+#define MASK_DBGSR_DE 0x1
+#define MASK_DBGSR_HALT 0x6
+#define MASK_DBGSR_SUSP 0x10
+#define MASK_DBGSR_PREVSUSP 0x20
+#define MASK_DBGSR_PEVT 0x40
+#define MASK_DBGSR_EVTSRC 0x1f00
+#define TRICORE_HFLAG_KUU 0x3
+#define TRICORE_HFLAG_UM0 0x00002 /* user mode-0 flag */
+#define TRICORE_HFLAG_UM1 0x00001 /* user mode-1 flag */
+#define TRICORE_HFLAG_SM 0x00000 /* kernel mode flag */
+
+#define SIZE_OF_64BIT 0xFFFFFFFF
 
 enum tricore_priv_levels {
     TRICORE_PRIV_UM0 = 0x0, /* user mode-0 flag */
@@ -175,7 +219,60 @@ enum tricore_features {
     TRICORE_FEATURE_16,
     TRICORE_FEATURE_161,
     TRICORE_FEATURE_162,
+    TRICORE_FEATURE_18,
 };
+
+/* Instruction set architecture V1.1.  */
+#define EF_TRICORE_V1_1 0x00000001
+#define EF_EABI_TRICORE_V1_1 0x80000000
+
+/* Instruction set architecture V1.2.  */
+#define EF_TRICORE_V1_2 0x00000002
+#define EF_EABI_TRICORE_V1_2 0x40000000
+
+/* Instruction set architecture V1.3  */
+#define EF_TRICORE_V1_3 0x00000004
+#define EF_EABI_TRICORE_V1_3 0x20000000
+
+/* Instruction set architecture V1.3.1  */
+
+#define EF_TRICORE_V1_3_1 0x00000100
+#define EF_EABI_TRICORE_V1_3_1 0x00800000
+
+/* Instruction set architecture V1.6.  */
+
+#define EF_TRICORE_V1_6 0x00000200
+#define EF_EABI_TRICORE_V1_6 0x00400000
+
+/* Instruction set architecture V1.6.1.  */
+
+#define EF_TRICORE_V1_6_1 0x00000400
+#define EF_EABI_TRICORE_V1_6_1 0x00200000
+
+/* Instruction set architecture V1.6.2.  */
+
+#define EF_TRICORE_V1_6_2 0x00000800
+#define EF_EABI_TRICORE_V1_6_2 0x00100000
+
+/* Instruction set architecture V1.8.  */
+
+#define EF_TRICORE_V1_8 0x00001000
+#define EF_EABI_TRICORE_V1_8 0x00080000
+
+/* PCP co-processor.  */
+
+#define EF_TRICORE_PCP 0x00000010
+#define EF_EABI_TRICORE_PCP 0x01000000
+
+/* PCP co-processor, version 2.  */
+
+#define EF_TRICORE_PCP2 0x00000020
+#define EF_EABI_TRICORE_PCP2 0x02000000
+
+#define EF_TRICORE_CORE_MASK 0x00001f0f
+#define EF_EABI_TRICORE_CORE_MASK 0xf0f80000
+
+#define SEC_PCP 0x10000000
 
 static inline int tricore_has_feature(CPUTriCoreState *env, int feature)
 {
@@ -293,7 +390,20 @@ static inline void cpu_get_tb_cpu_state(CPUTriCoreState *env, vaddr *pc,
 
 /* helpers.c */
 bool tricore_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
-                          MMUAccessType access_type, int mmu_idx,
-                          bool probe, uintptr_t retaddr);
+                          MMUAccessType access_type, int mmu_idx, bool probe,
+                          uintptr_t retaddr);
+
+enum { EXCP_EXIT = 0x1000, EXCP_SEMIHOST, EXCP_UNALIGNED, EXCP_INV_ACCESS };
+
+#define INSNOPCODE_DEBUG16 0xA000
+#define GCC_VIRTIO_MARKERPCM2 0x6f69
+#define GCC_VIRTIO_MARKERPCM4 0x765f
+#define GCC_VIRTIO_MARKEREXITPCM2 0x0E60
+#define GCC_VIRTIO_MARKEREXITPCM2_MASK 0x0FFF
+#define SIZE_OF_BYTE 0x08
+#define SIZE_OF_16BIT_WORD 0x10
+
+#define __VIRTUAL_IO__
+void tricore_vio_init(void);
 
 #endif /* TRICORE_CPU_H */
