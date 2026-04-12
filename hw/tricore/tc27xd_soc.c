@@ -177,12 +177,9 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
 
     /* now init peripherals */
     MemoryRegion *sysmem = get_system_memory();
-    
-    /* Create interrupt router */
-    s->cpu_irq = tricore_cpu_ir_init(&s->cpu);
 
     /* Register: Interrupt Router Bus (IRBUS) */
-    s->irbus = TRICORE_IRBUS(object_new(TYPE_TRICORE_IRBUS));
+    s->irbus = TRICORE_IR(object_new(TYPE_TRICORE_IR));
     s->asclin = TRICORE_ASCLIN(object_new(TYPE_TRICORE_ASCLIN));
     s->virt = TRICORE_VIRT(object_new(TYPE_TRICORE_VIRT));
     s->scu = TRICORE_SCU(object_new(TYPE_TRICORE_SCU));
@@ -222,7 +219,7 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
 
     /* finally map memory regions */
     memory_region_add_subregion(sysmem, sc->memmap[TC27XD_SFR].base, &s->sfr->iomem);
-    memory_region_add_subregion(sysmem, sc->memmap[TC27XD_IRBUS].base, &s->irbus->srvcontrolregs);
+    memory_region_add_subregion(sysmem, sc->memmap[TC27XD_IRBUS].base, &s->irbus->src_regs);
     memory_region_add_subregion(sysmem, sc->memmap[TC27XD_ASCLIN].base, &s->asclin->iomem);
     memory_region_add_subregion(sysmem, sc->memmap[TC27XD_VIRT].base, &s->virt->iomem);
     memory_region_add_subregion(sysmem, sc->memmap[TC27XD_SCU].base, &s->scu->iomem);

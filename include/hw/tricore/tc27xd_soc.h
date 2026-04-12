@@ -27,10 +27,9 @@
 
 #include "hw/tricore/tricore.h"
 #include "hw/tricore/tricore_virt.h"
-#include "hw/tricore/tricore_ir.h"
 #include "hw/tricore/tricore_scu.h"
 #include "hw/tricore/tricore_sfr.h"
-#include "hw/intc/tricore_irbus.h"
+#include "hw/intc/tricore_ir.h"
 #include "hw/timer/tricore_stm.h"
 #include "hw/char/tricore_asclin.h"
 #include "hw/tricore/tc_soc.h"
@@ -83,14 +82,14 @@ typedef struct TC27XDSoCState {
     TC27XDSoCCPUMemState cpu1mem;
     TC27XDSoCCPUMemState cpu2mem;
     
-    TriCoreIRBUSState *irbus;
+    TriCoreIRState *irbus;
     TriCoreVIRTState *virt;
     TriCoreSCUState *scu;
     TriCoreSTMState *stm;
     TriCoreASCLINState *asclin;
     TriCoreSFRState *sfr;
 
-    qemu_irq irq[IR_SRC_COUNT];
+    qemu_irq irq[256];
     qemu_irq *cpu_irq;
 
     TC27XDSoCFlashMemState flashmem;

@@ -27,10 +27,9 @@
 
 #include "hw/tricore/tricore.h"
 #include "hw/tricore/tricore_virt.h"
-#include "hw/tricore/tricore_ir.h"
 #include "hw/tricore/tricore_scu.h"
 #include "hw/tricore/tricore_sfr.h"
-#include "hw/intc/tricore_irbus.h"
+#include "hw/intc/tricore_ir.h"
 #include "hw/timer/tricore_stm.h"
 #include "hw/char/tricore_asclin.h"
 #include "hw/tricore/tc_soc.h"
@@ -104,14 +103,14 @@ typedef struct TC39XBSoCState {
     TC39XBSoCCPUMemState cpu5mem;
     TC39XBSoCFlashMemState flashmem;
     
-    TriCoreIRBUSState *irbus;
+    TriCoreIRState *irbus;
     TriCoreVIRTState *virt;
     TriCoreSCUState *scu;
     TriCoreSTMState *stm;
     TriCoreSFRState *sfr;
     TriCoreASCLINState *asclin;
 
-    qemu_irq irq[IR_SRC_COUNT];
+    qemu_irq irq[256];
     qemu_irq *cpu_irq;
 
 
