@@ -37,6 +37,7 @@ config TC39X_SOC
 config TC4DX_SOC
     bool
     select TC4X_CLOCK
+    select TC4X_CPU
     select TRICORE_ASCLIN
     select TRICORE_IRBUS
     select TRICORE_SCU
@@ -54,3 +55,9 @@ config TRICORE_SFR
 
 config TC4X_CLOCK
     bool
+
+config TC4X_CPU
+    bool
+    default y
+    depends on TRICORE_IRBUS
+    select TRICORE_STM
