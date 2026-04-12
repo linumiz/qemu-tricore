@@ -12,6 +12,7 @@
 #include "qapi/error.h"
 #include "trace.h"
 #include "exec/cpu-common.h"
+#include "hw/core/irq.h"
 #include "hw/core/sysbus.h"
 #include "hw/core/registerfields.h"
 #include "chardev/char-fe.h"
@@ -56,47 +57,12 @@ enum {
     RXDATAD,
 };
 
-static void uart_update_irq(TriCoreASCLINState *s)
-{
-    int rfe = (s->regs[FLAGSENABLE] & MASK_FLAGSENABLE_RFLE);
-    int tfe = (s->regs[FLAGSENABLE] & MASK_FLAGSENABLE_TFLE);
-    int rfl = (s->regs[FLAGS] & MASK_FLAGS_RFL);
-    int tfl = (s->regs[FLAGS] & MASK_FLAGS_TFL);
-
-    if (rfe && rfl) {
-        qemu_irq_raise(s->RXSR);
-    } else {
-        qemu_irq_lower(s->RXSR);
-    }
-    if (tfe && tfl) {
-        qemu_irq_raise(s->TXSR);
-    } else {
-        qemu_irq_lower(s->TXSR);
-    }
-}
-
-static void uart_update_flags(TriCoreASCLINState *s)
-{
-    /* when there is data to receive, set the RFL flag */
-    if (s->rxbufreadidx != s->rxbufwriteidx) {
-        qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RFL);
-    } else {
-        qatomic_and(&s->regs[FLAGS], ~MASK_FLAGS_RFL);
-    }
-
-    /* always set TFL, buffer is always empty */
-    qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TFL);
-
-    uart_update_irq(s);
-}
 
 static void asclin_buffer_reset(TriCoreASCLINState *s)
 {
     memset(s->rxbuf, 0x00, ASCLIN_RX_BUFFER);
     s->rxbufreadidx = 0;
     s->rxbufwriteidx = 0;
-
-    uart_update_flags(s);
 }
 
 static uint32_t asclin_buffer_used(TriCoreASCLINState *s)
@@ -136,17 +102,20 @@ static gboolean uart_transmit(void *do_not_use, GIOCondition cond, void *opaque)
             goto buffer_drained;
         }
         /* Transmit pending */
-        return FALSE;
+        return G_SOURCE_REMOVE;
     }
 
     buffer_drained:
 
-    /* Character successfully sent */
-    qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TC);
+    /* TOOD: Fifo condition*/
+    qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TFL);
 
-    uart_update_flags(s);
+    if (s->regs[FLAGSENABLE] & MASK_FLAGSENABLE_TFLE) {
+        qemu_irq_pulse(s->TXSR);
+    }
+    
 
-    return FALSE;
+    return G_SOURCE_REMOVE;
 }
 
 static gboolean uart_transmit_block(void *do_not_use, GIOCondition cond,
@@ -177,8 +146,6 @@ static gboolean uart_transmit_block(void *do_not_use, GIOCondition cond,
 
     /* Character successfully sent */
     qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TC);
-
-    uart_update_flags(s);
 
     return FALSE;
 }
@@ -282,7 +249,6 @@ static uint64_t uart_read(void *opaque, hwaddr offset, unsigned size)
         break;
     }
 
-    uart_update_flags(s);
     return r;
 }
 
@@ -413,7 +379,6 @@ static void uart_write(void *opaque, hwaddr offset, uint64_t value,
                       HWADDR_FMT_plx, reg_addr << 2);
         break;
     }
-    uart_update_irq(s);
 }
 
 static const MemoryRegionOps asclin_uart_mmio_ops = {
@@ -440,7 +405,13 @@ static void uart_rx(void *opaque, const uint8_t *buf, int size)
         size--;
     }
 
-    uart_update_flags(s);
+    /* TODO: Fifo condition */
+    if (s->rxbufreadidx != s->rxbufwriteidx) {
+        qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RFL);
+        if (s->regs[FLAGSENABLE] & MASK_FLAGSENABLE_RFLE) {
+            qemu_irq_pulse(s->RXSR);
+        }
+    }
 }
 
 static int uart_can_rx(void *opaque)
