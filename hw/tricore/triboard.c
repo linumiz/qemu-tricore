@@ -19,19 +19,18 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu/units.h"
-#include "qapi/error.h"
-#include "hw/core/qdev-properties.h"
-#include "net/net.h"
+#include "hw/core/clock.h"
 #include "hw/core/loader.h"
-#include "elf.h"
-#include "hw/tricore/tricore.h"
+#include "hw/core/qdev-clock.h"
+#include "qapi/error.h"
 #include "qemu/error-report.h"
+#include "qemu/units.h"
+#include "elf.h"
 
-#include "hw/tricore/triboard.h"
 #include "hw/tricore/tc27xd_soc.h"
 #include "hw/tricore/tc39xb_soc.h"
 #include "hw/tricore/tc4dx_soc.h"
+#include "hw/tricore/triboard.h"
 
 static void tricore_load_kernel(TriCoreCPU *cpu, const char *kernel_filename)
 {
@@ -53,24 +52,31 @@ static void tricore_load_kernel(TriCoreCPU *cpu, const char *kernel_filename)
 
 static void triboard_machine_tc4d7_init(MachineState *machine)
 {
-    TC4DXSoCState *soc;
+    DeviceState *dev;
+    Clock *fosc;
 
-    soc = TC4DX_SOC(object_new("tc4d7-soc"));
-    sysbus_realize(SYS_BUS_DEVICE(soc), &error_fatal);
+    /* This clock doesn't need migration because it is fixed-frequency */
+    fosc = clock_new(OBJECT(machine), "fosc");
+    clock_set_hz(fosc, 25000000);
+
+    dev = qdev_new("tc4d7-soc");
+    object_property_add_child(OBJECT(machine), "soc", OBJECT(dev));
+    qdev_connect_clock_in(dev, "fosc", fosc);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
 
     if (machine->kernel_filename) {
-        tricore_load_kernel(&soc->cpu, machine->kernel_filename);
+        tc4x_cpu_load_kernel(TC4DX_SOC(dev)->cpus[0].tricore,
+                             machine->kernel_filename, 0, 4 * MiB);
     }
 }
 
-static void triboard_machine_tc4d7_class_init(ObjectClass *oc,
-                                               const void *data)
+static void triboard_machine_tc4d7_class_init(ObjectClass *oc, const void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
 
     mc->init = triboard_machine_tc4d7_init;
     mc->desc = "Infineon AURIX Kit TC4D7 Lite";
-    mc->default_cpu_type = TRICORE_CPU_TYPE_NAME("tc37x");
+    mc->default_cpu_type = TRICORE_CPU_TYPE_NAME("tc4x");
 }
 
 
