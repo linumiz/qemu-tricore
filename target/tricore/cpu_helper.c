@@ -56,7 +56,7 @@ void tricore_cpu_do_interrupt(CPUState *cs)
         uint32_t new_FCX = cpu_ldl_le_data(env, ea);
 
         tricore_store_context_upper(env, ea);
-        env->PCXI = (temp_FCX & 0xFFFFF) & ul_mask;
+        env->PCXI = (temp_FCX & 0xFFFFF) | ul_mask;
         env->FCX = new_FCX;
         env->gpr_a[11] =
             cs->exception_index == EXCP_SYSCALL ? env->PC + 4 : env->PC;
