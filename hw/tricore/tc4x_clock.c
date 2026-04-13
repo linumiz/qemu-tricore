@@ -52,32 +52,27 @@ static void tc4x_clock_update_perccu(TC4xClockState *s) {
 
 static void tc4x_clock_update_freq(TC4xClockState *s)
 {
-    uint32_t fsource0 = clock_get(s->fsource0);
-    uint32_t fsource1 = clock_get(s->fsource1);
-    uint32_t fsource2 = clock_get(s->fsource2);
-    uint32_t fsource3 = clock_get(s->fsource3);
-
     switch (s->clksels) {
     case TC4X_CLOCK_CLKSEL_PLL:
         if (FIELD_EX32(s->SYSPLLCON0, SYSPLLCON0, PLLPWR) == 1) {
-            clock_set_hz(
+            clock_update(
                 s->fsource0,
-                clock_get_hz(s->fosc) /
-                    (FIELD_EX32(s->SYSPLLCON0, SYSPLLCON0, PDIV) + 1) *
-                    (FIELD_EX32(s->SYSPLLCON0, SYSPLLCON0, NDIV) + 1) /
+                clock_get(s->fosc) *
+                    (FIELD_EX32(s->SYSPLLCON0, SYSPLLCON0, PDIV) + 1) /
+                    (FIELD_EX32(s->SYSPLLCON0, SYSPLLCON0, NDIV) + 1) *
                     (FIELD_EX32(s->SYSPLLCON1, SYSPLLCON1, K2DIV) + 1));
         } else {
-            clock_set_hz(s->fsource0, 0);
+            clock_update_hz(s->fsource0, 0);
         }
         break;
     case TC4X_CLOCK_CLKSEL_BACK:
-        clock_set_hz(s->fsource0, 100000000);
+        clock_update_hz(s->fsource0, 100000000);
         break;
     case TC4X_CLOCK_CLKSEL_RAMP:
         if (s->rampfstat == TC4X_CLOCK_RAMP_FSTAT_AT_BASE) {
-            clock_set_hz(s->fsource0, 100000000);
+            clock_update_hz(s->fsource0, 100000000);
         } else if (s->rampfstat == TC4X_CLOCK_RAMP_FSTAT_AT_TOP) {
-            clock_set_hz(s->fsource0,
+            clock_update_hz(s->fsource0,
                          1000000 * FIELD_EX32(s->RAMPCON0, RAMPCON0, UFL));
         }
         break;
@@ -85,50 +80,37 @@ static void tc4x_clock_update_freq(TC4xClockState *s)
     switch (s->clkselp) {
     case TC4X_CLOCK_CLKSEL_PLL:
         if (FIELD_EX32(s->PERPLLCON0, PERPLLCON0, PLLPWR) == 1) {
-            clock_set_hz(
+            clock_update(
                 s->fsource1,
-                clock_get_hz(s->fosc) /
-                    (FIELD_EX32(s->PERPLLCON0, PERPLLCON0, PDIV) + 1) *
-                    (FIELD_EX32(s->PERPLLCON0, PERPLLCON0, NDIV) + 1) /
+                clock_get(s->fosc) *
+                    (FIELD_EX32(s->PERPLLCON0, PERPLLCON0, PDIV) + 1) /
+                    (FIELD_EX32(s->PERPLLCON0, PERPLLCON0, NDIV) + 1) *
                     (FIELD_EX32(s->PERPLLCON1, PERPLLCON1, K2DIV) + 1));
-            clock_set_hz(
+            clock_update(
                 s->fsource2,
-                clock_get_hz(s->fosc) /
-                    (FIELD_EX32(s->PERPLLCON0, PERPLLCON0, PDIV) + 1) *
-                    (FIELD_EX32(s->PERPLLCON0, PERPLLCON0, NDIV) + 1) /
+                clock_get(s->fosc) *
+                    (FIELD_EX32(s->PERPLLCON0, PERPLLCON0, PDIV) + 1) /
+                    (FIELD_EX32(s->PERPLLCON0, PERPLLCON0, NDIV) + 1) *
                     (FIELD_EX32(s->PERPLLCON1, PERPLLCON1, K3DIV) + 1));
-            clock_set_hz(
+            clock_update(
                 s->fsource3,
-                clock_get_hz(s->fosc) /
+                clock_get(s->fosc) *
                     (FIELD_EX32(s->PERPLLCON0, PERPLLCON0, PDIV) + 1) *
                     (FIELD_EX32(s->PERPLLCON0, PERPLLCON0, NDIV) + 1) /
                     (FIELD_EX32(s->PERPLLCON1, PERPLLCON1, K4DIV) + 1));
         } else {
-            clock_set_hz(s->fsource1, 0);
-            clock_set_hz(s->fsource2, 0);
-            clock_set_hz(s->fsource3, 0);
+            clock_update_hz(s->fsource1, 0);
+            clock_update_hz(s->fsource2, 0);
+            clock_update_hz(s->fsource3, 0);
         }
         break;
     case TC4X_CLOCK_CLKSEL_BACK:
-        clock_set_hz(s->fsource1, 100000000);
-        clock_set_hz(s->fsource2, 100000000);
-        clock_set_hz(s->fsource3, 100000000);
+        clock_update_hz(s->fsource1, 100000000);
+        clock_update_hz(s->fsource2, 100000000);
+        clock_update_hz(s->fsource3, 100000000);
         break;
     default:
         break;
-    }
-
-    if (fsource0 != clock_get(s->fsource0)) {
-        clock_propagate(s->fsource0);
-    }
-    if (fsource1 != clock_get(s->fsource1)) {
-        clock_propagate(s->fsource1);
-    }
-    if (fsource2 != clock_get(s->fsource2)) {
-        clock_propagate(s->fsource2);
-    }
-    if (fsource3 != clock_get(s->fsource3)) {
-        clock_propagate(s->fsource3);
     }
 }
 
@@ -153,56 +135,48 @@ static void tc4x_clock_write(void *opaque, hwaddr offset, uint64_t value,
         memcpy((uint8_t *)&s->CCUCON + (offset & 0x3), &value, size);
         s->clksels = FIELD_EX32(s->CCUCON, CCUCON, CLKSELS);
         s->clkselp = FIELD_EX32(s->CCUCON, CCUCON, CLKSELP);
-        tc4x_clock_update_freq(s);
         break;
     case R_SYSPLLCON0:
         memcpy((uint8_t *)&s->SYSPLLCON0 + (offset & 0x3), &value, size);
-        tc4x_clock_update_freq(s);
         break;
     case R_SYSPLLCON1:
         memcpy((uint8_t *)&s->SYSPLLCON1 + (offset & 0x3), &value, size);
-        tc4x_clock_update_freq(s);
         break;
     case R_SYSPLLCON2:
         memcpy((uint8_t *)&s->SYSPLLCON2 + (offset & 0x3), &value, size);
-        tc4x_clock_update_freq(s);
         break;
     case R_PERPLLCON0:
         memcpy((uint8_t *)&s->PERPLLCON0 + (offset & 0x3), &value, size);
-        tc4x_clock_update_freq(s);
         break;
     case R_PERPLLCON1:
         memcpy((uint8_t *)&s->PERPLLCON1 + (offset & 0x3), &value, size);
-        tc4x_clock_update_freq(s);
         break;
     case R_PERPLLCON2:
         memcpy((uint8_t *)&s->PERPLLCON2 + (offset & 0x3), &value, size);
-        tc4x_clock_update_freq(s);
         break;
     case R_RAMPCON0:
         memcpy((uint8_t *)&s->RAMPCON0 + (offset & 0x3), &value, size);
-        tc4x_clock_update_freq(s);
         s->RAMPCON0 &= ~R_RAMPCON0_CMD_MASK;
         break;
     case R_SYSCCUCON0:
         memcpy((uint8_t *)&s->SYSCCUCON0 + (offset & 0x3), &value, size);
-        tc4x_clock_update_sysccu(s);
         break;
-        case R_SYSCCUCON1:
+    case R_SYSCCUCON1:
         memcpy((uint8_t *)&s->SYSCCUCON1 + (offset & 0x3), &value, size);
-        tc4x_clock_update_sysccu(s);
         break;
     case R_PERCCUCON0:
         memcpy((uint8_t *)&s->PERCCUCON0 + (offset & 0x3), &value, size);
-        tc4x_clock_update_perccu(s);
         break;
     case R_PERCCUCON1:
         memcpy((uint8_t *)&s->PERCCUCON1 + (offset & 0x3), &value, size);
-        tc4x_clock_update_perccu(s);
         break;
     default:
         break;
     }
+
+    tc4x_clock_update_freq(s);
+    tc4x_clock_update_sysccu(s);
+    tc4x_clock_update_perccu(s);
 }
 
 static uint64_t tc4x_clock_read(void *opaque, hwaddr offset, unsigned size)
