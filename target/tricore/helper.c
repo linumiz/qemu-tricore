@@ -25,6 +25,8 @@
 #include "exec/target_page.h"
 #include "fpu/softfloat-helpers.h"
 #include "qemu/qemu-print.h"
+#include "system/memory.h"
+#include "system/address-spaces.h"
 
 enum {
     TLBRET_DIRTY = -4,
@@ -38,12 +40,21 @@ static int get_physical_address(CPUTriCoreState *env, hwaddr *physical,
                                 int *prot, vaddr address,
                                 MMUAccessType access_type, int mmu_idx)
 {
-    int ret = TLBRET_MATCH;
+    uint32_t seg = extract32(address, 28, 4);
 
     *physical = address & 0xFFFFFFFF;
     *prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
 
-    return ret;
+    /*
+     * PMA default segment attributes (TC1.6 Vol.1 Table 12, TC1.8 Vol.1):
+     * Segments 0xE, 0xF are peripheral space - no code fetch allowed.
+     * PMA2 reset value = 0x0000C000 (bits 15:14 = segs F and E).
+     */
+    if (seg == 0xF || seg == 0xE) {
+        *prot = PAGE_READ | PAGE_WRITE;
+    }
+
+    return TLBRET_MATCH;
 }
 
 hwaddr tricore_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)
@@ -60,42 +71,57 @@ hwaddr tricore_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)
     return phys_addr;
 }
 
-/* TODO: Add exception support */
-static void raise_mmu_exception(CPUTriCoreState *env, vaddr address,
-                                int rw, int tlb_error)
-{
-}
-
 bool tricore_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
-                          MMUAccessType rw, int mmu_idx,
+                          MMUAccessType access_type, int mmu_idx,
                           bool probe, uintptr_t retaddr)
 {
     CPUTriCoreState *env = cpu_env(cs);
     hwaddr physical;
     int prot;
-    int ret = 0;
 
-    rw &= 1;
-    ret = get_physical_address(env, &physical, &prot,
-                               address, rw, mmu_idx);
+    get_physical_address(env, &physical, &prot, address,
+                         access_type, mmu_idx);
 
-    qemu_log_mask(CPU_LOG_MMU, "%s address=0x%" VADDR_PRIx " ret %d physical "
-                  HWADDR_FMT_plx " prot %d\n",
-                  __func__, address, ret, physical, prot);
+    qemu_log_mask(CPU_LOG_MMU, "%s address=0x%" VADDR_PRIx " ret 0 physical "
+                  HWADDR_FMT_plx " prot %d access_type %d\n",
+                  __func__, address, physical, prot, access_type);
 
-    if (ret == TLBRET_MATCH) {
-        tlb_set_page(cs, address & TARGET_PAGE_MASK,
-                     physical & TARGET_PAGE_MASK, prot | PAGE_EXEC,
-                     mmu_idx, TARGET_PAGE_SIZE);
-        return true;
-    } else {
-        assert(ret < 0);
+    /* PSE: code fetch from peripheral space (seg E/F) */
+    if (access_type == MMU_INST_FETCH && !(prot & PAGE_EXEC)) {
         if (probe) {
             return false;
         }
-        raise_mmu_exception(env, address, rw, ret);
-        cpu_loop_exit_restore(cs, retaddr);
+        raise_exception_sync_internal(env, TRAPC_SYSBUS, TIN4_PSE,
+                                      retaddr, 0);
     }
+
+    /*
+     * DSE: data access to unmapped memory in non-peripheral segments.
+     * Check if any MemoryRegion (RAM or MMIO) covers this address.
+     * Skip segments E/F (peripheral space) - QEMU may have gaps in
+     * MMIO coverage for unmodeled peripheral registers.
+     */
+    if (access_type != MMU_INST_FETCH) {
+        uint32_t seg = extract32(address, 28, 4);
+        if (seg != 0xE && seg != 0xF) {
+            MemoryRegionSection section;
+            section = memory_region_find(get_system_memory(), physical, 1);
+            if (section.mr) {
+                memory_region_unref(section.mr);
+            } else {
+                if (probe) {
+                    return false;
+                }
+                raise_exception_sync_internal(env, TRAPC_SYSBUS, TIN4_DSE,
+                                              retaddr, 0);
+            }
+        }
+    }
+
+    tlb_set_page(cs, address & TARGET_PAGE_MASK,
+                 physical & TARGET_PAGE_MASK, prot,
+                 mmu_idx, TARGET_PAGE_SIZE);
+    return true;
 }
 
 void fpu_set_state(CPUTriCoreState *env)

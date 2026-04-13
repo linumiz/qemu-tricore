@@ -278,6 +278,11 @@ void tricore_translate_code(CPUState *cs, TranslationBlock *tb,
 void tricore_cpu_do_interrupt(CPUState *cs);
 void tricore_check_interrupts(CPUTriCoreState *cs);
 
+/* op_helper.c - trap entry with full context save */
+G_NORETURN
+void raise_exception_sync_internal(CPUTriCoreState *env, uint32_t class,
+                                   int tin, uintptr_t pc, uint32_t fcd_pc);
+
 static inline void cpu_get_tb_cpu_state(CPUTriCoreState *env, vaddr *pc,
                                         uint64_t *cs_base, uint32_t *flags)
 {
