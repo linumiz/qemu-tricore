@@ -8982,9 +8982,8 @@ static void decode_sys_interrupts(DisasContext *ctx)
         break;
     case OPC2_32_SYS_WAIT:
     	if (has_feature(ctx, TRICORE_FEATURE_16)) {
-            tcg_gen_movi_tl(cpu_PC, ctx->base.pc_next);
+            gen_save_pc(ctx->pc_succ_insn);
             gen_helper_wait(tcg_env);
-            ctx->base.is_jmp = DISAS_NORETURN;
     	} else {
     		generate_trap(ctx, TRAPC_INSN_ERR, TIN2_IOPC);
     	}
