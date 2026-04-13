@@ -44,6 +44,12 @@ FIELD(LWSR, ID, 16, 9)
 FIELD(LWSR, CS, 27, 1)
 FIELD(LWSR, STAT, 31, 1)
 
+FIELD(LASR, PN, 0, 8)
+FIELD(LASR, ECC, 8, 6)
+FIELD(LASR, ID, 16, 11)
+FIELD(LASR, CS, 27, 1)
+FIELD(LASR, VM, 28, 3)
+FIELD(LASR, ENTER, 31, 1)
 
 typedef struct TriCoreIRState {
     SysBusDevice parent_obj;

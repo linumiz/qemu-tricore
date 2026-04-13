@@ -118,6 +118,11 @@ void tricore_ir_irq_acknowledge(TriCoreIRState *s, uint16_t irq, uint8_t vm)
         s->lwsr[0] &= ~R_LWSR_STAT_MASK;
     }
 
+    s->lasr = FIELD_DP32(0, LASR, ENTER, 1) | FIELD_DP32(0, LASR, VM, 0) |
+              FIELD_DP32(0, LASR, ID, irq) | FIELD_DP32(0, LASR, ECC, 0) |
+              FIELD_DP32(0, LASR, CS, 0) |
+              FIELD_DP32(0, LASR, PN, FIELD_EX32(src_reg, SRC, SRPN));
+
     irq_evaluate(s);
 }
 
