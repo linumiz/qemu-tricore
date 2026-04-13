@@ -6549,16 +6549,14 @@ static void decode_rr_idirect(DisasContext *ctx)
         tcg_gen_andi_i32(cpu_PC, cpu_gpr_a[r1], ~0x1);
         break;
     case OPC2_32_RR_JRI:
-    	if (has_feature(ctx, TRICORE_FEATURE_18)) 
-        {
-    		TCGv_i32 temp;
-    		temp = tcg_temp_new_i32();
-    		tcg_gen_andi_i32(temp, cpu_gpr_a[r1], ~0x1);
-    		tcg_gen_add_i32(cpu_PC, temp, cpu_PC);
-    		    	} else 
-        {
-    		generate_trap(ctx, TRAPC_INSN_ERR, TIN2_IOPC);
-    	}
+        if (has_feature(ctx, TRICORE_FEATURE_18)) {
+            TCGv_i32 temp;
+            temp = tcg_temp_new_i32();
+            tcg_gen_andi_i32(temp, cpu_gpr_a[r1], ~0x1);
+            tcg_gen_add_i32(cpu_PC, temp, cpu_PC);
+        } else {
+            generate_trap(ctx, TRAPC_INSN_ERR, TIN2_IOPC);
+        }
         break;
     default:
         generate_trap(ctx, TRAPC_INSN_ERR, TIN2_IOPC);
