@@ -317,6 +317,7 @@ static void gen_ld_4regs_128(DisasContext *ctx,
 {
     TCGv_i32 temp = tcg_temp_new_i32();
 
+    gen_check_align(ctx, addr, 4);
     tcg_gen_qemu_ld_i32(rh0, addr, ctx->mem_idx, MO_LEUL);
     tcg_gen_addi_i32(temp, addr, 4);
     tcg_gen_qemu_ld_i32(rh1, temp, ctx->mem_idx, MO_LEUL);
@@ -333,6 +334,7 @@ static void gen_st_4regs_128(DisasContext *ctx,
 {
     TCGv_i32 temp = tcg_temp_new_i32();
 
+    gen_check_align(ctx, addr, 4);
     tcg_gen_qemu_st_i32(rh0, addr, ctx->mem_idx, MO_LEUL);
     tcg_gen_addi_i32(temp, addr, 4);
     tcg_gen_qemu_st_i32(rh1, temp, ctx->mem_idx, MO_LEUL);
@@ -2995,6 +2997,7 @@ static void gen_fcall_save_ctx(DisasContext *ctx)
     TCGv_i32 temp = tcg_temp_new_i32();
 
     tcg_gen_addi_i32(temp, cpu_gpr_a[10], -4);
+    gen_check_align(ctx, temp, 4);
     tcg_gen_qemu_st_i32(cpu_gpr_a[11], temp, ctx->mem_idx, MO_LESL);
     tcg_gen_movi_i32(cpu_gpr_a[11], ctx->pc_succ_insn);
     tcg_gen_mov_i32(cpu_gpr_a[10], temp);
@@ -3005,6 +3008,7 @@ static void gen_fret(DisasContext *ctx)
     TCGv_i32 temp = tcg_temp_new_i32();
 
     tcg_gen_andi_i32(temp, cpu_gpr_a[11], ~0x1);
+    gen_check_align(ctx, cpu_gpr_a[10], 4);
     tcg_gen_qemu_ld_i32(cpu_gpr_a[11], cpu_gpr_a[10], ctx->mem_idx, MO_LESL);
     tcg_gen_addi_i32(cpu_gpr_a[10], cpu_gpr_a[10], 4);
     tcg_gen_mov_i32(cpu_PC, temp);
@@ -3932,6 +3936,7 @@ static void decode_abs_ldw(DisasContext *ctx)
 
     switch (op2) {
     case OPC2_32_ABS_LD_A:
+        gen_check_align(ctx, temp, 4);
         tcg_gen_qemu_ld_i32(cpu_gpr_a[r1], temp, ctx->mem_idx, MO_LESL);
         break;
     case OPC2_32_ABS_LD_D:
@@ -3943,6 +3948,7 @@ static void decode_abs_ldw(DisasContext *ctx)
         gen_ld_2regs_64(ctx, cpu_gpr_a[r1 + 1], cpu_gpr_a[r1], temp);
         break;
     case OPC2_32_ABS_LD_W:
+        gen_check_align(ctx, temp, 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], temp, ctx->mem_idx, MO_LESL);
         break;
     default:
@@ -3971,9 +3977,11 @@ static void decode_abs_ldb(DisasContext *ctx)
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], temp, ctx->mem_idx, MO_UB);
         break;
     case OPC2_32_ABS_LD_H:
+        gen_check_align(ctx, temp, 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], temp, ctx->mem_idx, MO_LESW);
         break;
     case OPC2_32_ABS_LD_HU:
+        gen_check_align(ctx, temp, 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], temp, ctx->mem_idx, MO_LEUW);
         break;
     default:
@@ -4085,6 +4093,7 @@ static void decode_abs_storeb_h(DisasContext *ctx)
         tcg_gen_qemu_st_i32(cpu_gpr_d[r1], temp, ctx->mem_idx, MO_UB);
         break;
     case OPC2_32_ABS_ST_H:
+        gen_check_align(ctx, temp, 2);
         tcg_gen_qemu_st_i32(cpu_gpr_d[r1], temp, ctx->mem_idx, MO_LEUW);
         break;
     default:
@@ -4581,10 +4590,12 @@ static void decode_bo_addrmode_bitreverse_circular(DisasContext *ctx)
         gen_helper_circ_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1], t_off10);
         break;
     case OPC2_32_BO_ST_A_BR:
+        gen_check_align(ctx, temp2, 4);
         tcg_gen_qemu_st_i32(cpu_gpr_a[r1], temp2, ctx->mem_idx, MO_LEUL);
         gen_helper_br_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1]);
         break;
     case OPC2_32_BO_ST_A_CIRC:
+        gen_check_align(ctx, temp2, 4);
         tcg_gen_qemu_st_i32(cpu_gpr_a[r1], temp2, ctx->mem_idx, MO_LEUL);
         gen_helper_circ_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1], t_off10);
         break;
@@ -4603,6 +4614,7 @@ static void decode_bo_addrmode_bitreverse_circular(DisasContext *ctx)
         break;
     case OPC2_32_BO_ST_D_CIRC:
         CHECK_REG_PAIR(r1);
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_st_i32(cpu_gpr_d[r1], temp2, ctx->mem_idx, MO_LEUL);
         tcg_gen_shri_i32(temp2, cpu_gpr_a[r2 + 1], 16);
         tcg_gen_addi_i32(temp, temp, 4);
@@ -4618,6 +4630,7 @@ static void decode_bo_addrmode_bitreverse_circular(DisasContext *ctx)
         break;
     case OPC2_32_BO_ST_DA_CIRC:
         CHECK_REG_PAIR(r1);
+        gen_check_align(ctx, temp2, 4);
         tcg_gen_qemu_st_i32(cpu_gpr_a[r1], temp2, ctx->mem_idx, MO_LEUL);
         tcg_gen_shri_i32(temp2, cpu_gpr_a[r2 + 1], 16);
         tcg_gen_addi_i32(temp, temp, 4);
@@ -4627,28 +4640,34 @@ static void decode_bo_addrmode_bitreverse_circular(DisasContext *ctx)
         gen_helper_circ_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1], t_off10);
         break;
     case OPC2_32_BO_ST_H_BR:
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_st_i32(cpu_gpr_d[r1], temp2, ctx->mem_idx, MO_LEUW);
         gen_helper_br_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1]);
         break;
     case OPC2_32_BO_ST_H_CIRC:
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_st_i32(cpu_gpr_d[r1], temp2, ctx->mem_idx, MO_LEUW);
         gen_helper_circ_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1], t_off10);
         break;
     case OPC2_32_BO_ST_Q_BR:
         tcg_gen_shri_i32(temp, cpu_gpr_d[r1], 16);
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_st_i32(temp, temp2, ctx->mem_idx, MO_LEUW);
         gen_helper_br_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1]);
         break;
     case OPC2_32_BO_ST_Q_CIRC:
         tcg_gen_shri_i32(temp, cpu_gpr_d[r1], 16);
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_st_i32(temp, temp2, ctx->mem_idx, MO_LEUW);
         gen_helper_circ_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1], t_off10);
         break;
     case OPC2_32_BO_ST_W_BR:
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_st_i32(cpu_gpr_d[r1], temp2, ctx->mem_idx, MO_LEUL);
         gen_helper_br_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1]);
         break;
     case OPC2_32_BO_ST_W_CIRC:
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_st_i32(cpu_gpr_d[r1], temp2, ctx->mem_idx, MO_LEUL);
         gen_helper_circ_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1], t_off10);
         break;
@@ -4674,6 +4693,7 @@ static void decode_bo_addrmode_ld_post_pre_base(DisasContext *ctx)
         gen_offset_ld(ctx, cpu_gpr_a[r1], cpu_gpr_a[r2], off10, MO_LEUL);
         break;
     case OPC2_32_BO_LD_A_POSTINC:
+        gen_check_align(ctx, cpu_gpr_a[r2], 4);
         tcg_gen_qemu_ld_i32(cpu_gpr_a[r1], cpu_gpr_a[r2], ctx->mem_idx,
                            MO_LEUL);
         tcg_gen_addi_i32(cpu_gpr_a[r2], cpu_gpr_a[r2], off10);
@@ -4743,6 +4763,7 @@ static void decode_bo_addrmode_ld_post_pre_base(DisasContext *ctx)
         gen_offset_ld(ctx, cpu_gpr_d[r1], cpu_gpr_a[r2], off10, MO_LESW);
         break;
     case OPC2_32_BO_LD_H_POSTINC:
+        gen_check_align(ctx, cpu_gpr_a[r2], 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], cpu_gpr_a[r2], ctx->mem_idx,
                            MO_LESW);
         tcg_gen_addi_i32(cpu_gpr_a[r2], cpu_gpr_a[r2], off10);
@@ -4754,6 +4775,7 @@ static void decode_bo_addrmode_ld_post_pre_base(DisasContext *ctx)
         gen_offset_ld(ctx, cpu_gpr_d[r1], cpu_gpr_a[r2], off10, MO_LEUW);
         break;
     case OPC2_32_BO_LD_HU_POSTINC:
+        gen_check_align(ctx, cpu_gpr_a[r2], 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], cpu_gpr_a[r2], ctx->mem_idx,
                            MO_LEUW);
         tcg_gen_addi_i32(cpu_gpr_a[r2], cpu_gpr_a[r2], off10);
@@ -4766,6 +4788,7 @@ static void decode_bo_addrmode_ld_post_pre_base(DisasContext *ctx)
         tcg_gen_shli_i32(cpu_gpr_d[r1], cpu_gpr_d[r1], 16);
         break;
     case OPC2_32_BO_LD_Q_POSTINC:
+        gen_check_align(ctx, cpu_gpr_a[r2], 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], cpu_gpr_a[r2], ctx->mem_idx,
                            MO_LEUW);
         tcg_gen_shli_i32(cpu_gpr_d[r1], cpu_gpr_d[r1], 16);
@@ -4779,6 +4802,7 @@ static void decode_bo_addrmode_ld_post_pre_base(DisasContext *ctx)
         gen_offset_ld(ctx, cpu_gpr_d[r1], cpu_gpr_a[r2], off10, MO_LEUL);
         break;
     case OPC2_32_BO_LD_W_POSTINC:
+        gen_check_align(ctx, cpu_gpr_a[r2], 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], cpu_gpr_a[r2], ctx->mem_idx,
                            MO_LEUL);
         tcg_gen_addi_i32(cpu_gpr_a[r2], cpu_gpr_a[r2], off10);
@@ -4852,10 +4876,12 @@ static void decode_bo_addrmode_ld_bitreverse_circular(DisasContext *ctx)
 
     switch (op2) {
     case OPC2_32_BO_LD_A_BR:
+        gen_check_align(ctx, temp2, 4);
         tcg_gen_qemu_ld_i32(cpu_gpr_a[r1], temp2, ctx->mem_idx, MO_LEUL);
         gen_helper_br_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1]);
         break;
     case OPC2_32_BO_LD_A_CIRC:
+        gen_check_align(ctx, temp2, 4);
         tcg_gen_qemu_ld_i32(cpu_gpr_a[r1], temp2, ctx->mem_idx, MO_LEUL);
         gen_helper_circ_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1], t_off10);
         break;
@@ -4882,6 +4908,7 @@ static void decode_bo_addrmode_ld_bitreverse_circular(DisasContext *ctx)
         break;
     case OPC2_32_BO_LD_D_CIRC:
         CHECK_REG_PAIR(r1);
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], temp2, ctx->mem_idx, MO_LEUL);
         tcg_gen_shri_i32(temp2, cpu_gpr_a[r2 + 1], 16);
         tcg_gen_addi_i32(temp, temp, 4);
@@ -4897,6 +4924,7 @@ static void decode_bo_addrmode_ld_bitreverse_circular(DisasContext *ctx)
         break;
     case OPC2_32_BO_LD_DA_CIRC:
         CHECK_REG_PAIR(r1);
+        gen_check_align(ctx, temp2, 4);
         tcg_gen_qemu_ld_i32(cpu_gpr_a[r1], temp2, ctx->mem_idx, MO_LEUL);
         tcg_gen_shri_i32(temp2, cpu_gpr_a[r2 + 1], 16);
         tcg_gen_addi_i32(temp, temp, 4);
@@ -4906,36 +4934,44 @@ static void decode_bo_addrmode_ld_bitreverse_circular(DisasContext *ctx)
         gen_helper_circ_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1], t_off10);
         break;
     case OPC2_32_BO_LD_H_BR:
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], temp2, ctx->mem_idx, MO_LESW);
         gen_helper_br_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1]);
         break;
     case OPC2_32_BO_LD_H_CIRC:
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], temp2, ctx->mem_idx, MO_LESW);
         gen_helper_circ_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1], t_off10);
         break;
     case OPC2_32_BO_LD_HU_BR:
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], temp2, ctx->mem_idx, MO_LEUW);
         gen_helper_br_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1]);
         break;
     case OPC2_32_BO_LD_HU_CIRC:
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], temp2, ctx->mem_idx, MO_LEUW);
         gen_helper_circ_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1], t_off10);
         break;
     case OPC2_32_BO_LD_Q_BR:
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], temp2, ctx->mem_idx, MO_LEUW);
         tcg_gen_shli_i32(cpu_gpr_d[r1], cpu_gpr_d[r1], 16);
         gen_helper_br_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1]);
         break;
     case OPC2_32_BO_LD_Q_CIRC:
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], temp2, ctx->mem_idx, MO_LEUW);
         tcg_gen_shli_i32(cpu_gpr_d[r1], cpu_gpr_d[r1], 16);
         gen_helper_circ_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1], t_off10);
         break;
     case OPC2_32_BO_LD_W_BR:
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], temp2, ctx->mem_idx, MO_LEUL);
         gen_helper_br_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1]);
         break;
     case OPC2_32_BO_LD_W_CIRC:
+        gen_check_align(ctx, temp2, 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], temp2, ctx->mem_idx, MO_LEUL);
         gen_helper_circ_update(cpu_gpr_a[r2 + 1], cpu_gpr_a[r2 + 1], t_off10);
         break;
@@ -5104,11 +5140,13 @@ static void decode_bol_opc(DisasContext *ctx, int32_t op1)
     case OPC1_32_BOL_LD_A_LONGOFF:
         temp = tcg_temp_new_i32();
         tcg_gen_addi_i32(temp, cpu_gpr_a[r2], address);
+        gen_check_align(ctx, temp, 4);
         tcg_gen_qemu_ld_i32(cpu_gpr_a[r1], temp, ctx->mem_idx, MO_LEUL);
         break;
     case OPC1_32_BOL_LD_W_LONGOFF:
         temp = tcg_temp_new_i32();
         tcg_gen_addi_i32(temp, cpu_gpr_a[r2], address);
+        gen_check_align(ctx, temp, 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], temp, ctx->mem_idx, MO_LEUL);
         break;
     case OPC1_32_BOL_LEA_LONGOFF:
@@ -8342,6 +8380,7 @@ static void decode_32Bit_opc(DisasContext *ctx)
         temp = tcg_constant_i32(EA_ABS_FORMAT(address));
         temp2 = tcg_temp_new_i32();
 
+        gen_check_align(ctx, temp, 2);
         tcg_gen_shri_i32(temp2, cpu_gpr_d[r1], 16);
         tcg_gen_qemu_st_i32(temp2, temp, ctx->mem_idx, MO_LEUW);
         break;
@@ -8350,6 +8389,7 @@ static void decode_32Bit_opc(DisasContext *ctx)
         r1 = MASK_OP_ABS_S1D(ctx->opcode);
         temp = tcg_constant_i32(EA_ABS_FORMAT(address));
 
+        gen_check_align(ctx, temp, 2);
         tcg_gen_qemu_ld_i32(cpu_gpr_d[r1], temp, ctx->mem_idx, MO_LEUW);
         tcg_gen_shli_i32(cpu_gpr_d[r1], cpu_gpr_d[r1], 16);
         break;
