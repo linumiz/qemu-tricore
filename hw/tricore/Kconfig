@@ -20,3 +20,11 @@ config TRICORE_VIRT
 
 config TRICORE_SFR
     bool
+
+config TC4X_CLOCK
+    bool
+
+config TC4X_CPU
+    bool
+    depends on TRICORE_IRBUS
+    select TRICORE_STM
