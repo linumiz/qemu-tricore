@@ -11,3 +11,12 @@ config TRIBOARD
 
 config TC27X_SOC
     bool
+
+config TRICORE_SCU
+    bool
+
+config TRICORE_VIRT
+    bool
+
+config TRICORE_SFR
+    bool
