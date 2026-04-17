@@ -1,0 +1,75 @@
+name: Build TriCore QEMU
+
+on:
+  push:
+    branches: [master, release/ifx/tricore-*]
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ninja-build pkg-config \
+            libglib2.0-dev libpixman-1-dev \
+            python3 python3-venv
+
+      - name: Configure
+        run: |
+          mkdir build
+          cd build
+          ../configure --target-list=tricore-softmmu \
+            --prefix=/opt/qemu-tricore \
+            --disable-docs \
+            --disable-gtk \
+            --disable-sdl \
+            --disable-opengl \
+            --disable-virglrenderer \
+            --disable-vte \
+            --disable-brlapi \
+            --disable-curl \
+            --disable-vnc \
+            --disable-pa \
+            --disable-alsa \
+            --disable-jack \
+            --disable-oss
+
+      - name: Build
+        run: |
+          cd build
+          make -j$(nproc)
+
+      - name: Verify
+        run: |
+          ./build/qemu-system-tricore --version
+          ./build/qemu-system-tricore -machine help | grep -q KIT_AURIX_TC277_TRB
+          ./build/qemu-system-tricore -machine help | grep -q KIT_AURIX_TC397B_TRB
+          ./build/qemu-system-tricore -machine help | grep -q KIT_A3G_TC4D7_LITE
+
+      - name: Install
+        run: |
+          cd build
+          DESTDIR=${{ github.workspace }}/install make install
+          tar -czf qemu-tricore-linux-x86_64.tar.gz \
+            -C ${{ github.workspace }}/install/opt/qemu-tricore .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-tricore-linux-x86_64
+          path: build/qemu-tricore-linux-x86_64.tar.gz
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/qemu-tricore-linux-x86_64.tar.gz
+          generate_release_notes: true
