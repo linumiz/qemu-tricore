@@ -40,3 +40,20 @@ config TC4X_CPU
     bool
     depends on TRICORE_IRBUS
     select TRICORE_STM
+
+config TRIBOARD_TC4D7
+    bool
+    default y
+    depends on TRICORE
+    select TC4DX_SOC
+
+config TC4DX_SOC
+    bool
+    select TC4X_CLOCK
+    select TC4X_CPU
+    select TRICORE_ASCLIN
+    select TRICORE_IRBUS
+    select TRICORE_SCU
+    select TRICORE_STM
+    select TRICORE_VIRT
+    select TRICORE_SFR

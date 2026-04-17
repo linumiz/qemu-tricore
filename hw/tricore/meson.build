@@ -9,4 +9,6 @@ tricore_ss.add(when: 'CONFIG_TC39X_SOC', if_true: files('tc39xb_soc.c'))
 tricore_ss.add(when: 'CONFIG_TC4X_CLOCK', if_true: files('tc4x_clock.c'))
 tricore_ss.add(when: 'CONFIG_TC4X_CPU', if_true: files('tc4x_cpu.c'))
 
+specific_ss.add(when: 'CONFIG_TC4DX_SOC', if_true: files('tc4dx_soc.c'))
+
 hw_arch += {'tricore': tricore_ss}

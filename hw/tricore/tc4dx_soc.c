@@ -1,0 +1,146 @@
+/*
+ * Infineon TC4Dx SoC System emulation.
+ *
+ * Copyright (c) 2026 Parthiban Nallathambi <parthiban@linumiz.com>
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ */
+
+#include "qemu/osdep.h"
+#include "hw/core/loader.h"
+#include "hw/core/qdev-clock.h"
+#include "hw/core/qdev-properties.h"
+#include "hw/core/qdev.h"
+#include "hw/core/sysbus.h"
+#include "hw/misc/unimp.h"
+#include "qapi/error.h"
+#include "qemu/units.h"
+
+#include "hw/tricore/tc4x_cpu.h"
+#include "hw/tricore/tc4dx_soc.h"
+#include "hw/tricore/triboard.h"
+#include "qom/object.h"
+
+static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
+{
+    TC4DXSoCState *s = TC4DX_SOC(dev_soc);
+    DeviceState *cpu, *dev;
+    SysBusDevice *busdev;
+    MemoryRegion *system_memory = get_system_memory();
+    int i;
+
+    if (!clock_has_source(s->fosc)) {
+        error_setg(errp, "osc clock must be wired up by the board code");
+        return;
+    }
+
+    /* IR controller */
+    dev = DEVICE(&s->ir);
+    qdev_prop_set_bit(dev, "tc4x-mode", true);
+    qdev_prop_set_uint8(dev, "num-isps", 1);
+    qdev_prop_set_uint16(dev, "num-irqs", 256);
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->ir), errp)) {
+        return;
+    }
+    busdev = SYS_BUS_DEVICE(dev);
+    sysbus_mmio_map(busdev, 0, 0xF4430000);
+    sysbus_mmio_map(busdev, 1, 0xF4432000);
+
+    /* Clock controller */
+    dev = DEVICE(&s->clock);
+    qdev_connect_clock_in(dev, "fosc", s->fosc);
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->clock), errp)) {
+        return;
+    }
+    busdev = SYS_BUS_DEVICE(dev);
+    sysbus_mmio_map(busdev, 0, 0xF0064000);
+
+    for (i = 0; i < 1; i++) {
+        memory_region_add_subregion(system_memory, 0, &s->cpus[0].container);
+        cpu = DEVICE(&s->cpus[i]);
+        qdev_prop_set_string(cpu, "cpu-type", TRICORE_CPU_TYPE_NAME("tc4x"));
+        qdev_prop_set_uint8(cpu, "cpu-id", i);
+        qdev_prop_set_bit(cpu, "start-powered-off", i != 0);
+        object_property_set_link(OBJECT(cpu), "ir", OBJECT(&s->ir), &error_abort);
+        qdev_connect_clock_in(cpu, "fstm", s->clock.fstm);
+        qdev_connect_clock_in(cpu, "fcpu", s->clock.fsri);
+        object_property_set_link(OBJECT(cpu), "memory", OBJECT(system_memory),
+                                 &error_abort);
+        object_property_set_link(OBJECT(cpu), "ir", OBJECT(&s->ir),
+                                 &error_abort);
+        if (!sysbus_realize(SYS_BUS_DEVICE(cpu), errp)) {
+            return;
+        }
+        qdev_connect_gpio_out_named(
+            DEVICE(&s->ir), "isp", i,
+            qdev_get_gpio_in_named(cpu, "tricore.irq", 0));
+        sysbus_connect_irq(
+            SYS_BUS_DEVICE(cpu), 0,
+            qdev_get_gpio_in_named(DEVICE(&s->ir), "irq", 8 + 0x10 * i + 2));
+    }
+
+    create_unimplemented_device("tc4x-sfr", 0xF0000000, 0x400000);
+
+    for (i = 0; i < 1; i++) {
+        dev = DEVICE(&s->asclin[i]);
+        qdev_prop_set_chr(DEVICE(&s->asclin[i]), "chardev", serial_hd(0));
+        if (!sysbus_realize(SYS_BUS_DEVICE(&s->asclin[i]), errp)) {
+            return;
+        }
+        busdev = SYS_BUS_DEVICE(dev);
+        sysbus_mmio_map(busdev, 0, 0xF46C0000 + 0x200 * i);
+        sysbus_connect_irq(
+            busdev, 0,
+            qdev_get_gpio_in_named(DEVICE(&s->ir), "irq", 173 + i * 3));
+        sysbus_connect_irq(
+            busdev, 1,
+            qdev_get_gpio_in_named(DEVICE(&s->ir), "irq", 172 + i * 3));
+        sysbus_connect_irq(
+            busdev, 2,
+            qdev_get_gpio_in_named(DEVICE(&s->ir), "irq", 174 + i * 3));
+    }
+}
+
+static void tc4dx_soc_init(Object *obj)
+{
+    TC4DXSoCState *s = TC4DX_SOC(obj);
+
+    object_initialize_child(obj, "tc4x-cpu", &s->cpus[0], TYPE_TC4X_CPU);
+    object_initialize_child(obj, "ir", &s->ir, TYPE_TRICORE_IR);
+    object_initialize_child(obj, "clock", &s->clock, TYPE_TC4X_CLOCK);
+    object_initialize_child(obj, "asclin", &s->asclin[0], TYPE_TRICORE_ASCLIN);
+
+    s->fosc = qdev_init_clock_in(DEVICE(s), "fosc", NULL, NULL, 0);
+}
+
+static void tc4dx_soc_class_init(ObjectClass *klass, const void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    dc->realize = tc4dx_soc_realize;
+}
+
+static void tc4d7_soc_class_init(ObjectClass *oc, const void *data)
+{
+    TC4DXSoCClass *sc = TC4DX_SOC_CLASS(oc);
+
+    sc->name         = "tc4dx-soc";
+}
+
+static const TypeInfo tc4dx_soc_types[] = {
+    {
+        .name = "tc4d7-soc",
+        .parent = TYPE_TC4DX_SOC,
+        .class_init = tc4d7_soc_class_init,
+    },
+    {
+        .name = TYPE_TC4DX_SOC,
+        .parent = TYPE_SYS_BUS_DEVICE,
+        .instance_size = sizeof(TC4DXSoCState),
+        .instance_init = tc4dx_soc_init,
+        .class_size = sizeof(TC4DXSoCClass),
+        .class_init = tc4dx_soc_class_init,
+        .abstract = true,
+    },
+};
+
+DEFINE_TYPES(tc4dx_soc_types)
