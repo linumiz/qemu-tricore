@@ -24,7 +24,8 @@
 #include "system/address-spaces.h"
 #include "qom/object.h"
 
-#include "hw/tricore/tc27x_soc.h"
+#include "hw/tricore/tc27xd_soc.h"
+#include "hw/tricore/tc39xb_soc.h"
 
 #define TYPE_TRIBOARD_MACHINE MACHINE_TYPE_NAME("triboard")
 typedef struct TriBoardMachineState TriBoardMachineState;
@@ -36,7 +37,8 @@ DECLARE_OBJ_CHECKERS(TriBoardMachineState, TriBoardMachineClass,
 struct TriBoardMachineState {
     MachineState parent;
 
-    TC27XSoCState tc27x_soc;
+    TC27XDSoCState tc27xd_soc;
+    TC39XBSoCState tc39xb_soc;
 };
 
 struct TriBoardMachineClass {
