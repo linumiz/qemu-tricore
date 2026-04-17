@@ -38,12 +38,19 @@ static int get_physical_address(CPUTriCoreState *env, hwaddr *physical,
                                 int *prot, vaddr address,
                                 MMUAccessType access_type, int mmu_idx)
 {
-    int ret = TLBRET_MATCH;
-
     *physical = address & 0xFFFFFFFF;
     *prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
 
-    return ret;
+    /* TC1.6/TC1.8 8.3: segments E and F are peripheral space.
+     * Instruction fetch from peripheral space is rejected by the
+     * bus fabric and raises Class 4 TIN 1 PSE on real silicon.
+     */
+    if (access_type == MMU_INST_FETCH &&
+        (address & 0xE0000000u) == 0xE0000000u) {
+        return TLBRET_BADADDR;
+    }
+
+    return TLBRET_MATCH;
 }
 
 hwaddr tricore_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)
@@ -60,10 +67,13 @@ hwaddr tricore_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)
     return phys_addr;
 }
 
-/* TODO: Add exception support */
 static void raise_mmu_exception(CPUTriCoreState *env, vaddr address,
-                                int rw, int tlb_error)
+                                MMUAccessType rw, int tlb_error)
 {
+    CPUState *cs = env_cpu(env);
+
+    cs->exception_index = TRAPC_SYSBUS;
+    env->tin = (rw == MMU_INST_FETCH) ? TIN4_PSE : TIN4_DSE;
 }
 
 bool tricore_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
@@ -73,9 +83,8 @@ bool tricore_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
     CPUTriCoreState *env = cpu_env(cs);
     hwaddr physical;
     int prot;
-    int ret = 0;
+    int ret;
 
-    rw &= 1;
     ret = get_physical_address(env, &physical, &prot,
                                address, rw, mmu_idx);
 
@@ -85,7 +94,7 @@ bool tricore_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
 
     if (ret == TLBRET_MATCH) {
         tlb_set_page(cs, address & TARGET_PAGE_MASK,
-                     physical & TARGET_PAGE_MASK, prot | PAGE_EXEC,
+                     physical & TARGET_PAGE_MASK, prot,
                      mmu_idx, TARGET_PAGE_SIZE);
         return true;
     } else {
@@ -170,8 +179,9 @@ void NAME(CPUTriCoreState *env, uint32_t val)                            \
 {                                                                         \
     if (tricore_has_feature(env, TRICORE_FEATURE_##FEATURE)) {            \
         env->REG = FIELD_DP32(env->REG, REG, FIELD ## _ ## FEATURE, val); \
+    } else {                                                              \
+        env->REG = FIELD_DP32(env->REG, REG, FIELD ## _13, val);          \
     }                                                                     \
-    env->REG = FIELD_DP32(env->REG, REG, FIELD ## _13, val);              \
 }
 
 #define FIELD_SETTER(NAME, REG, FIELD)                \
