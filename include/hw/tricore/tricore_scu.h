@@ -68,6 +68,11 @@
 #define RESET_TRICORE_WDTSCON0 0xFFFC000E
 #define RESET_TRICORE_WDTSCON1 0x0
 #define RESET_TRICORE_WDTCPU0CON0 0xFFFC000E
+/*
+ * default reset value of 0x0001_0000, plus
+ * LBTERM set to simulate LBIST executed successfully during SSW
+ */
+#define RESET_TRICORE_RSTSTAT 0x40010000
 
 typedef enum {
     TRICORE_SCU_NORMAL, TRICORE_SCU_FREERUNNING, TRICORE_SCU_PRESCALER
@@ -90,6 +95,7 @@ typedef struct {
     uint32_t PLLERAYSTAT;
     uint32_t PLLERAYCON[2];
     uint32_t CCUCON[9];
+    uint32_t RSTSTAT;
     uint32_t FDR;
     uint32_t EXTCON;
 

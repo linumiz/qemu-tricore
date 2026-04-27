@@ -375,6 +375,9 @@ static uint64_t tricore_scu_read(void *opaque, hwaddr offset, unsigned size)
     case 0x34:
         r = s->CCUCON[1];
         break;
+    case 0x50:
+        r = s->RSTSTAT;
+        break;
     case 0xf0:
         /* SCU_WDTS_CON0 */
         r = s->WDTSCON1;
@@ -456,6 +459,7 @@ static void tricore_scu_reset(Object *obj, ResetType type)
     s->WDTCPU0CON0 = RESET_TRICORE_WDTCPU0CON0;
     s->WDTSCON0 = RESET_TRICORE_WDTSCON0;
     s->WDTSCON1 = RESET_TRICORE_WDTSCON1;
+    s->RSTSTAT = RESET_TRICORE_RSTSTAT;
 }
 
 static const MemoryRegionOps tricore_scu_ops = {
