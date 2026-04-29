@@ -28,6 +28,7 @@
 #include "elf.h"
 
 #include "hw/tricore/tc27xd_soc.h"
+#include "hw/tricore/tc33x_soc.h"
 #include "hw/tricore/tc39xb_soc.h"
 #include "hw/tricore/tc4dx_soc.h"
 #include "hw/tricore/triboard.h"
@@ -92,6 +93,20 @@ static void triboard_machine_tc27xd_init(MachineState *machine)
     }
 }
 
+static void triboard_machine_tc33x_init(MachineState *machine)
+{
+    TriBoardMachineState *ms = TRIBOARD_MACHINE(machine);
+    TriBoardMachineClass *amc = TRIBOARD_MACHINE_GET_CLASS(machine);
+
+    object_initialize_child(OBJECT(machine), "tc33x_soc", &ms->tc33x_soc,
+                            amc->soc_name);
+    sysbus_realize(SYS_BUS_DEVICE(&ms->tc33x_soc), &error_fatal);
+
+    if (machine->kernel_filename) {
+        tricore_load_kernel(&ms->tc33x_soc.cpu, machine->kernel_filename);
+    }
+}
+
 static void triboard_machine_tc39xb_init(MachineState *machine)
 {
     TriBoardMachineState *ms = TRIBOARD_MACHINE(machine);
@@ -118,6 +133,18 @@ static void triboard_machine_tc277d_class_init(ObjectClass *oc,
     amc->soc_name = "tc277d-soc";
 };
 
+static void triboard_machine_tc337_class_init(ObjectClass *oc,
+                                              const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+    TriBoardMachineClass *amc = TRIBOARD_MACHINE_CLASS(oc);
+
+    mc->init = triboard_machine_tc33x_init;
+    mc->desc = "Infineon AURIX TriBoard TC337 (B-Step)";
+    mc->max_cpus = 1;
+    amc->soc_name = "tc337-soc";
+};
+
 static void triboard_machine_tc397b_class_init(ObjectClass *oc,
                                                const void *data)
 {
@@ -142,6 +169,11 @@ static const TypeInfo triboard_machine_types[] = {
         .name = MACHINE_TYPE_NAME("KIT_AURIX_TC277_TRB"),
         .parent = TYPE_TRIBOARD_MACHINE,
         .class_init = triboard_machine_tc277d_class_init,
+    },
+    {
+        .name = MACHINE_TYPE_NAME("KIT_AURIX_TC337_TRB"),
+        .parent = TYPE_TRIBOARD_MACHINE,
+        .class_init = triboard_machine_tc337_class_init,
     },
     {
         .name = MACHINE_TYPE_NAME("KIT_AURIX_TC397B_TRB"),

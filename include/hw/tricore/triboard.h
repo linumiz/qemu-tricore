@@ -25,6 +25,7 @@
 #include "qom/object.h"
 
 #include "hw/tricore/tc27xd_soc.h"
+#include "hw/tricore/tc33x_soc.h"
 #include "hw/tricore/tc39xb_soc.h"
 
 #define TYPE_TRIBOARD_MACHINE MACHINE_TYPE_NAME("triboard")
@@ -38,6 +39,7 @@ struct TriBoardMachineState {
     MachineState parent;
 
     TC27XDSoCState tc27xd_soc;
+    TC33XSoCState  tc33x_soc;
     TC39XBSoCState tc39xb_soc;
 };
 
