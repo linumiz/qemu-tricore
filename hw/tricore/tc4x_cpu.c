@@ -30,12 +30,42 @@
 static uint64_t tc4x_cpu_sfr_stub_read(void *opaque, hwaddr offset,
                                        unsigned size)
 {
+    TC4xCPUState *s = opaque;
+
+    switch (offset) {
+    case 0xD000: return s->krst0;
+    case 0xD004: return s->krst1;
+    case 0x1FE08: return s->boot_pc >> 1;
+    case 0x1FE60: return s->bootcon;
+    default: break;
+    }
     return 0;
 }
 
 static void tc4x_cpu_sfr_stub_write(void *opaque, hwaddr offset,
                                     uint64_t value, unsigned size)
 {
+    TC4xCPUState *s = opaque;
+
+    switch (offset) {
+    case 0xD000:
+        s->krst0 = value;
+        break;
+    case 0xD004:
+        s->krst1 = value;
+        break;
+    case 0x1FE08:
+        s->boot_pc = value << 1;
+        break;
+    case 0x1FE60:
+        s->bootcon = value;
+        if (!(value & 1)) {
+            tc4x_cpu_start_core(s, s->boot_pc);
+        }
+        break;
+    default:
+        break;
+    }
 }
 
 static const MemoryRegionOps tc4x_cpu_sfr_stub_ops = {

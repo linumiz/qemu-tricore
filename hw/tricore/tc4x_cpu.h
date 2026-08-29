@@ -37,6 +37,10 @@ struct TC4xCPUState {
     uint32_t dpsr_size;
     uint32_t dlmu_size;
     uint32_t pflash_size;
+    uint32_t boot_pc;
+    uint32_t bootcon;
+    uint32_t krst0;
+    uint32_t krst1;
 
     char *cpu_type;
     MemoryRegion *board_memory;
