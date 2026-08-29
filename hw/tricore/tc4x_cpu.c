@@ -229,6 +229,10 @@ static const VMStateDescription vmstate_tc4x_cpu = {
     .minimum_version_id = 1,
     .fields = (const VMStateField[]){ VMSTATE_CLOCK(fstm, TC4xCPUState),
                                       VMSTATE_CLOCK(fcpu, TC4xCPUState),
+                                      VMSTATE_UINT32(bootcon, TC4xCPUState),
+                                      VMSTATE_UINT32(boot_pc, TC4xCPUState),
+                                      VMSTATE_UINT32(krst0, TC4xCPUState),
+                                      VMSTATE_UINT32(krst1, TC4xCPUState),
                                       VMSTATE_END_OF_LIST() }
 };
 
