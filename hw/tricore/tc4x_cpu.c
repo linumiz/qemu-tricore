@@ -305,6 +305,8 @@ void tc4x_cpu_start_core(TC4xCPUState *cpu, hwaddr entry)
     cs = CPU(cpu->tricore);
     cpu->tricore->env.PC = entry;
     cs->halted = 0;
+    qemu_log_mask(CPU_LOG_EXEC, "tc4x: starting CPU%u at PC 0x%08" PRIx64 "\n",
+                  cpu->id, (uint64_t)entry);
     cpu_resume(cs);
 }
 
