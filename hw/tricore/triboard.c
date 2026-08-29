@@ -88,7 +88,7 @@ static void triboard_machine_tc27xd_init(MachineState *machine)
     sysbus_realize(SYS_BUS_DEVICE(&ms->tc27xd_soc), &error_fatal);
 
     if (machine->kernel_filename) {
-        tricore_load_kernel(&ms->tc27xd_soc.cpu, machine->kernel_filename);
+        tricore_load_kernel(&ms->tc27xd_soc.cpus[0], machine->kernel_filename);
     }
 }
 

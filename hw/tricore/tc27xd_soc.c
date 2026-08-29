@@ -30,6 +30,66 @@
 #include "hw/tricore/tc27xd_soc.h"
 #include "hw/tricore/triboard.h"
 
+static uint64_t tc27x_cpu_ctrl_read(void *opaque, hwaddr offset, unsigned size)
+{
+    struct TC27XCPUControl *c = opaque;
+    if (offset == 0x1FE08) return c->pc;
+    if (offset == 0x1FD00) return c->dbgsr;
+    return 0;
+}
+
+static void tc27x_cpu_ctrl_write(void *opaque, hwaddr offset,
+                                 uint64_t value, unsigned size)
+{
+    struct TC27XCPUControl *c = opaque;
+    if (offset == 0x1FE08) {
+        c->pc = value << 1;
+    } else if (offset == 0x1FD00) {
+        c->dbgsr = value;
+        if (c->id > 0 && (value & 3) == 2) {
+            CPUState *cs = CPU(&c->soc->cpus[c->id]);
+            c->soc->cpus[c->id].env.PC = c->pc;
+            cs->halted = 0;
+            cpu_resume(cs);
+        }
+    }
+}
+
+static const MemoryRegionOps tc27x_cpu_ctrl_ops = {
+    .read = tc27x_cpu_ctrl_read,
+    .write = tc27x_cpu_ctrl_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid.min_access_size = 1,
+    .valid.max_access_size = 4,
+};
+
+static void tc27x_pmcsr_write(void *opaque, hwaddr offset,
+                              uint64_t value, unsigned size)
+{
+    TC27XDSoCState *s = opaque;
+    unsigned id = offset >> 2;
+    if (id < 3 && !(value & 3) && id > 0) {
+        CPUState *cs = CPU(&s->cpus[id]);
+        cs->halted = 0;
+        cpu_resume(cs);
+    }
+}
+
+static uint64_t tc27x_pmcsr_read(void *opaque, hwaddr offset, unsigned size)
+{
+    TC27XDSoCState *s = opaque;
+    unsigned id = offset >> 2;
+    return (id < 3 && id > 0) ? 1 : 0;
+}
+
+static const MemoryRegionOps tc27x_pmcsr_ops = {
+    .read = tc27x_pmcsr_read,
+    .write = tc27x_pmcsr_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid.min_access_size = 1,
+    .valid.max_access_size = 4,
+};
+
 const MemmapEntry tc27xd_soc_memmap[] = {
     [TC27XD_DSPR2]     = { 0x50000000,            120 * KiB },
     [TC27XD_DCACHE2]   = { 0x5001E000,              8 * KiB },
@@ -194,27 +254,31 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     object_property_add_child(OBJECT(dev_soc), "sfr", OBJECT(s->sfr));
 
     qdev_prop_set_bit(DEVICE(s->irbus), "tc4x-mode", false);
-    qdev_prop_set_uint8(DEVICE(s->irbus), "num-isps", 4);
+    qdev_prop_set_uint8(DEVICE(s->irbus), "num-isps", 3);
     qdev_prop_set_uint16(DEVICE(s->irbus), "num-irqs", 512);
 
-    object_property_set_link(OBJECT(&s->cpu), "ir",
-                             OBJECT(s->irbus), &error_abort);
-
-    qdev_realize(DEVICE(&s->cpu), NULL, &err);
-    if (err) {
-        error_propagate(errp, err);
-        return;
+    for (unsigned i = 0; i < 3; i++) {
+        object_property_set_bool(OBJECT(&s->cpus[i]), "start-powered-off",
+                                 i != 0, &error_abort);
+        CPU(&s->cpus[i])->cpu_index = i;
+        object_property_set_link(OBJECT(&s->cpus[i]), "ir",
+                                 OBJECT(s->irbus), &error_abort);
+        qdev_realize(DEVICE(&s->cpus[i]), NULL, &err);
+        if (err) { error_propagate(errp, err); return; }
     }
-
     tc27xd_soc_init_memory_mapping(dev_soc);
 
     MemoryRegion *sysmem = get_system_memory();
+    memory_region_init_io(&s->pmcsr_region, OBJECT(s), &tc27x_pmcsr_ops,
+                          s, "tc27x-pmcsr", 0x0c);
+    memory_region_add_subregion_overlap(sysmem, 0xF00360D4, &s->pmcsr_region,
+                                        1);
 
     Clock *fstm = clock_new(OBJECT(dev_soc), "fstm");
     clock_set_hz(fstm, 50000000);
     qdev_connect_clock_in(DEVICE(s->stm), "fstm", fstm);
 
-    object_property_add_const_link(OBJECT(s->scu), "cpu", OBJECT(&s->cpu));
+    object_property_add_const_link(OBJECT(s->scu), "cpu", OBJECT(&s->cpus[0]));
     qdev_prop_set_chr(DEVICE(s->asclin), "chardev", serial_hd(0));
 
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->sfr), &error_fatal);
@@ -227,8 +291,22 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(s->irbus), 0, 0xF0037000);
     sysbus_mmio_map(SYS_BUS_DEVICE(s->irbus), 1, 0xF0038000);
 
-    qdev_connect_gpio_out_named(DEVICE(s->irbus), "isp", 0,
-        qdev_get_gpio_in_named(DEVICE(&s->cpu), "tricore.irq", 0));
+    for (unsigned i = 0; i < 3; i++) {
+        qdev_connect_gpio_out_named(DEVICE(s->irbus), "isp", i,
+            qdev_get_gpio_in_named(DEVICE(&s->cpus[i]), "tricore.irq", 0));
+    }
+
+    /* TC27D CPU register windows: F881/F883/F8850000. */
+    for (unsigned i = 0; i < 3; i++) {
+        struct TC27XCPUControl *c = &s->cpu_ctrl[i];
+        c->soc = s; c->id = i; c->dbgsr = i ? 1 : 0;
+        char *name = g_strdup_printf("tc27x-cpu%u-control", i);
+        memory_region_init_io(&c->region, OBJECT(s), &tc27x_cpu_ctrl_ops,
+                              c, name, 0x20000);
+        g_free(name);
+        memory_region_add_subregion(sysmem, 0xF8810000 + i * 0x20000,
+                                    &c->region);
+    }
 
     sysbus_connect_irq(SYS_BUS_DEVICE(s->asclin), 0,
         qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
@@ -260,7 +338,7 @@ static void tc27xd_soc_reset(DeviceState *dev_soc)
 {
     TC27XDSoCState *s = TC27XD_SOC(dev_soc);
     
-    cpu_state_reset(&s->cpu.env);
+    for (unsigned i = 0; i < 3; i++) cpu_state_reset(&s->cpus[i].env);
 }
 
 static void tc27xd_soc_init(Object *obj)
@@ -268,7 +346,11 @@ static void tc27xd_soc_init(Object *obj)
     TC27XDSoCState *s = TC27XD_SOC(obj);
     TC27XDSoCClass *sc = TC27XD_SOC_GET_CLASS(s);
 
-    object_initialize_child(obj, "tc27x", &s->cpu, sc->cpu_type);
+    for (unsigned i = 0; i < 3; i++) {
+        char *name = g_strdup_printf("tc27x-cpu%u", i);
+        object_initialize_child(obj, name, &s->cpus[i], sc->cpu_type);
+        g_free(name);
+    }
 }
 
 static void tc27xd_soc_class_init(ObjectClass *klass, const void *data)
@@ -286,7 +368,7 @@ static void tc277d_soc_class_init(ObjectClass *oc, const void *data)
     sc->name         = "tc277d-soc";
     sc->cpu_type     = TRICORE_CPU_TYPE_NAME("tc2x");
     sc->memmap       = tc27xd_soc_memmap;
-    sc->num_cpus     = 1;
+    sc->num_cpus     = 3;
 }
 
 static const TypeInfo tc27xd_soc_types[] = {

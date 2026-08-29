@@ -73,7 +73,15 @@ typedef struct TC27XDSoCState {
     SysBusDevice parent_obj;
 
     /*< public >*/
-    TriCoreCPU cpu;
+    TriCoreCPU cpus[3];
+    struct TC27XCPUControl {
+        struct TC27XDSoCState *soc;
+        unsigned id;
+        MemoryRegion region;
+        uint32_t pc;
+        uint32_t dbgsr;
+    } cpu_ctrl[3];
+    MemoryRegion pmcsr_region;
 
     MemoryRegion dsprX;
     MemoryRegion psprX;
