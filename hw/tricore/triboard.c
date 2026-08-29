@@ -126,7 +126,7 @@ static void triboard_machine_tc397b_class_init(ObjectClass *oc,
 
     mc->init = triboard_machine_tc39xb_init;
     mc->desc = "Infineon AURIX TriBoard TC397 (B-Step)";
-    mc->max_cpus = 1;
+    mc->max_cpus = 6;
     amc->soc_name = "tc397b-soc";
 };
 

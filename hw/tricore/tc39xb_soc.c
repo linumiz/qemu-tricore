@@ -318,7 +318,12 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     /* TC3x CPU-local SFRs (including CPUx_KRST0/KRST1) are not modeled yet.
      * Map the documented local window explicitly so startup accesses are
      * visible as unimplemented instead of falling through an unmapped hole. */
-    create_unimplemented_device("tc39x-cpu-local-sfr", 0xF8800000, 0x40000);
+    for (unsigned i = 0; i < 6; i++) {
+        char *name = g_strdup_printf("tc39x-cpu%u-local-sfr", i);
+        create_unimplemented_device(name, 0xF8800000 + i * 0x40000,
+                                    0x40000);
+        g_free(name);
+    }
 
     /* IR MMIO: idx 0 = int_region (F0037000), idx 1 = src_region (F0038000) */
     sysbus_mmio_map(SYS_BUS_DEVICE(s->irbus), 0, 0xF0037000);
