@@ -29,6 +29,7 @@ static void irq_evaluate(void *opaque)
     uint16_t tos_irq[8] = { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
                             0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF };
     uint8_t tos_priority[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+    uint8_t tos_vm[8] = { 0 };
 
     for (uint32_t srcnum = 0; srcnum < pv->num_irqs; srcnum++) {
         uint32_t src_reg = pv->src_regs[srcnum];
@@ -54,6 +55,7 @@ static void irq_evaluate(void *opaque)
                 (priority == tos_priority[tos] && srcnum < tos_irq[tos])) {
                 tos_priority[tos] = priority;
                 tos_irq[tos] = srcnum;
+                tos_vm[tos] = FIELD_EX32(src_reg, SRC, VM);
             }
         }
     }
@@ -71,6 +73,12 @@ static void irq_evaluate(void *opaque)
                                 FIELD_DP32(0, LWSR, ID, tos_irq[tos_idx]) |
                                 FIELD_DP32(0, LWSR, VALID, 1) |
                                 FIELD_DP32(0, LWSR, PN, tos_priority[tos_idx]);
+            if (pv->tc4x_mode) {
+                pv->lwsr[tos_idx] = FIELD_DP32(pv->lwsr[tos_idx], LWSR, VM,
+                                               tos_vm[tos_idx]);
+                pv->lasr = FIELD_DP32(pv->lasr, LASR, ID, tos_irq[tos_idx]);
+                pv->lasr = FIELD_DP32(pv->lasr, LASR, VM, tos_vm[tos_idx]);
+            }
 
             if (qemu_loglevel_mask(CPU_LOG_INT)) {
                 qemu_log("tricore_ir: raise TOS %d irq line (irq: %d, "
