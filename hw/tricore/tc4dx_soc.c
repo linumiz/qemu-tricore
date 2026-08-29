@@ -77,6 +77,15 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
         sysbus_connect_irq(
             SYS_BUS_DEVICE(cpu), 0,
             qdev_get_gpio_in_named(DEVICE(&s->ir), "irq", 8 + 0x10 * i + 2));
+        if (i > 0) {
+            char *name = g_strdup_printf("CPU%d_SFR_ALIAS", i);
+            memory_region_init_alias(&s->cpu_sfr_alias[i], OBJECT(s), name,
+                                     &s->cpus[i].sfr_stub, 0, 0x40000);
+            g_free(name);
+            memory_region_add_subregion_overlap(
+                system_memory, 0xF8800000 + (i * 0x40000),
+                &s->cpu_sfr_alias[i], 1);
+        }
     }
 
     create_unimplemented_device("tc4x-sfr", 0xF0000000, 0x400000);

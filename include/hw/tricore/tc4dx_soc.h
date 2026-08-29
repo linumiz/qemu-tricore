@@ -31,6 +31,7 @@ typedef struct TC4DXSoCState {
     SysBusDevice parent_obj;
 
     TC4xCPUState cpus[TC4DX_MAX_CPUS];
+    MemoryRegion cpu_sfr_alias[TC4DX_MAX_CPUS];
 
     TriCoreIRState ir;
     TC4xClockState clock;
