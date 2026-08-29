@@ -320,8 +320,8 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
      * visible as unimplemented instead of falling through an unmapped hole. */
     for (unsigned i = 0; i < 6; i++) {
         char *name = g_strdup_printf("tc39x-cpu%u-local-sfr", i);
-        create_unimplemented_device(name, 0xF8800000 + i * 0x40000,
-                                    0x40000);
+        create_unimplemented_device(name, 0xF8800000 + i * 0x20000,
+                                    0x20000);
         g_free(name);
     }
 
