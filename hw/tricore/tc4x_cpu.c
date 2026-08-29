@@ -229,7 +229,9 @@ static const Property tc4x_cpu_properties[] = {
 static int tc4x_cpu_post_load(void *opaque, int version_id)
 {
     TC4xCPUState *s = opaque;
-    if (s->tricore && (s->migration_running || s->id > 0)) {
+    /* Only cores that were running at save time may be resumed.  A powered-
+     * off secondary core must remain halted on the incoming VM. */
+    if (s->tricore && s->migration_running) {
         CPU(s->tricore)->halted = 0;
         cpu_resume(CPU(s->tricore));
         qemu_cpu_kick(CPU(s->tricore));
