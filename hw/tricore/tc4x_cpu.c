@@ -232,6 +232,7 @@ static int tc4x_cpu_post_load(void *opaque, int version_id)
     if (s->tricore && (s->migration_running || s->id > 0)) {
         CPU(s->tricore)->halted = 0;
         cpu_resume(CPU(s->tricore));
+        qemu_cpu_kick(CPU(s->tricore));
     }
     return 0;
 }
