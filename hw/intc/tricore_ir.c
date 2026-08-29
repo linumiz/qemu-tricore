@@ -19,6 +19,7 @@
 #include "qemu/bitops.h"
 #include "qemu/log.h"
 #include "qemu/typedefs.h"
+#include "qapi/error.h"
 #include "glib.h"
 
 
@@ -154,14 +155,24 @@ static void tricore_ir_src_regs_write(void *opaque, hwaddr offset,
         return;
     }
 
-    uint32_t srcc = (value & ~(R_SRC_SETR_MASK | R_SRC_CLRR_MASK));
+    uint32_t srcc = value & ~(R_SRC_SETR_MASK | R_SRC_CLRR_MASK |
+                              R_SRC_IOV_MASK | R_SRC_IOVCLR_MASK);
     bool setr = value & R_SRC_SETR_MASK;
     bool clrr = value & R_SRC_CLRR_MASK;
+    bool sws = !s->tc4x_mode && (value & R_SRC_TC3X_SWS_MASK);
+    bool swsclr = !s->tc4x_mode && (value & R_SRC_TC3X_SWSCLR_MASK);
+    bool iovclr = value & R_SRC_IOVCLR_MASK;
 
-    if (setr && !clrr) {
+    if ((setr || sws) && !(clrr || swsclr)) {
         srcc |= R_SRC_SRR_MASK;
-    } else if (clrr && !setr) {
+    } else if (clrr || swsclr) {
         srcc &= ~R_SRC_SRR_MASK;
+    } else {
+        srcc |= s->src_regs[srcnum] & R_SRC_SRR_MASK;
+    }
+
+    if (!iovclr) {
+        srcc |= s->src_regs[srcnum] & R_SRC_IOV_MASK;
     }
 
     s->src_regs[srcnum] = srcc;
