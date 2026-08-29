@@ -45,5 +45,6 @@ struct TC4xCPUState {
 
 void tc4x_cpu_load_kernel(TriCoreCPU *cpu, const char *kernel_filename,
                           hwaddr mem_base, int mem_size);
+void tc4x_cpu_start_core(TC4xCPUState *cpu, hwaddr entry);
 
 #endif /* TC4X_CPU_H */

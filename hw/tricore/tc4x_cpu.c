@@ -261,6 +261,20 @@ void tc4x_cpu_load_kernel(TriCoreCPU *cpu, const char *kernel_filename,
     s->PC = entry;
 }
 
+void tc4x_cpu_start_core(TC4xCPUState *cpu, hwaddr entry)
+{
+    CPUState *cs;
+
+    if (!cpu || !cpu->tricore) {
+        return;
+    }
+
+    cs = CPU(cpu->tricore);
+    cpu->tricore->env.PC = entry;
+    cs->halted = 0;
+    cpu_resume(cs);
+}
+
 
 static void tc4x_cpu_register_types(void)
 {
