@@ -82,8 +82,9 @@ static void irq_evaluate(void *opaque)
 
             if (qemu_loglevel_mask(CPU_LOG_INT)) {
                 qemu_log("tricore_ir: raise TOS %d irq line (irq: %d, "
-                         "priority: %d)\n",
-                         tos_idx, tos_irq[tos_idx], tos_priority[tos_idx]);
+                         "priority: %d, vm: %d)\n",
+                         tos_idx, tos_irq[tos_idx], tos_priority[tos_idx],
+                         pv->tc4x_mode ? FIELD_EX32(pv->lwsr[tos_idx], LWSR, VM) : 0);
             }
             qemu_irq_raise(pv->isp_irqs[tos_idx]);
         }
