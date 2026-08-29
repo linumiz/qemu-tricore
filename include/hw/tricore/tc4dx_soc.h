@@ -23,13 +23,14 @@
 #include "hw/tricore/tc_soc.h"
 
 #define TYPE_TC4DX_SOC ("tc4dx-soc")
+#define TC4DX_MAX_CPUS 6
 OBJECT_DECLARE_TYPE(TC4DXSoCState, TC4DXSoCClass, TC4DX_SOC)
 
 
 typedef struct TC4DXSoCState {
     SysBusDevice parent_obj;
 
-    TC4xCPUState cpus[1];
+    TC4xCPUState cpus[TC4DX_MAX_CPUS];
 
     TriCoreIRState ir;
     TC4xClockState clock;

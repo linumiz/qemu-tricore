@@ -105,7 +105,11 @@ static void tc4dx_soc_init(Object *obj)
 {
     TC4DXSoCState *s = TC4DX_SOC(obj);
 
-    object_initialize_child(obj, "tc4x-cpu", &s->cpus[0], TYPE_TC4X_CPU);
+    for (unsigned i = 0; i < TC4DX_MAX_CPUS; i++) {
+        char *name = g_strdup_printf("tc4x-cpu%u", i);
+        object_initialize_child(obj, name, &s->cpus[i], TYPE_TC4X_CPU);
+        g_free(name);
+    }
     object_initialize_child(obj, "ir", &s->ir, TYPE_TRICORE_IR);
     object_initialize_child(obj, "clock", &s->clock, TYPE_TC4X_CLOCK);
     object_initialize_child(obj, "asclin", &s->asclin[0], TYPE_TRICORE_ASCLIN);
