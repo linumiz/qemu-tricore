@@ -35,6 +35,10 @@ static void irq_evaluate(void *opaque)
         uint8_t tos = pv->tc4x_mode ? FIELD_EX32(src_reg, SRC_TC4X, TOS) :
                                       FIELD_EX32(src_reg, SRC_TC3X, TOS);
 
+        if (tos >= ARRAY_SIZE(tos_irq)) {
+            continue;
+        }
+
         if ((src_reg & R_SRC_SRR_MASK) &&
             (pv->tc4x_mode ? (src_reg & R_SRC_TC4X_SRE_MASK) :
                              (src_reg & R_SRC_TC3X_SRE_MASK))) {
@@ -42,8 +46,14 @@ static void irq_evaluate(void *opaque)
                 qemu_log("tricore_ir: pending irq #%d (priority %d, TOS %d)\n",
                          srcnum, priority, tos);
             }
-            tos_priority[tos] = priority;
-            tos_irq[tos] = srcnum;
+            /* Select the highest-priority pending source for each TOS.  If
+             * priorities tie, retain the lower SRC number for deterministic
+             * behaviour instead of depending on iteration order. */
+            if (tos_irq[tos] == 0xFFFF || priority > tos_priority[tos] ||
+                (priority == tos_priority[tos] && srcnum < tos_irq[tos])) {
+                tos_priority[tos] = priority;
+                tos_irq[tos] = srcnum;
+            }
         }
     }
 
