@@ -168,14 +168,14 @@ static void tc4x_cpu_realize(DeviceState *dev, Error **errp)
         return;
     }
     memory_region_add_subregion(
-        &s->container, TC4X_PFLASH_C_BASE - (s->id * TC4X_PFLASH_STRIDE),
+        &s->container, TC4X_PFLASH_C_BASE + (s->id * TC4X_PFLASH_STRIDE),
         &s->pflash);
     char *pflash_alias_name = g_strdup_printf("CPU%d_PFLASH_ALIAS", s->id);
     memory_region_init_alias(&s->pflash_alias, OBJECT(s), pflash_alias_name,
                              &s->pflash, 0, s->pflash_size);
     free(pflash_alias_name);
     memory_region_add_subregion(
-        &s->container, TC4X_PFLASH_NC_BASE - (s->id * TC4X_PFLASH_STRIDE),
+        &s->container, TC4X_PFLASH_NC_BASE + (s->id * TC4X_PFLASH_STRIDE),
         &s->pflash_alias);
 
     char *dsprname = g_strdup_printf("CPU%d_DSPR", s->id);
