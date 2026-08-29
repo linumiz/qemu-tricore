@@ -62,7 +62,9 @@ static void tc39x_cpu_sfr_write(void *opaque, hwaddr offset,
         break;
     case 0x1FE14:
         s->syscon = value;
-        if (!(value & 1) && s->id > 0) {
+        /* BHALT is bit 24 in CPUx_SYSCON.  Clearing it releases the
+         * secondary core after the SSW has programmed CPUx_PC. */
+        if (!(value & (1u << 24)) && s->id > 0) {
             CPUState *cs = CPU(&s->soc->cpus[s->id]);
             s->soc->cpus[s->id].env.PC = s->boot_pc;
             cs->halted = 0;
@@ -370,6 +372,12 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     /* TC3x CPU-local SFRs (including CPUx_KRST0/KRST1) are not modeled yet.
      * Map the documented local window explicitly so startup accesses are
      * visible as unimplemented instead of falling through an unmapped hole. */
+    /* TC397B has a hole before CPU5's local window (CPU5 is at F88C0000,
+     * unlike the 0x20000-stepped CPU0..CPU4 windows). */
+    static const hwaddr cpu_sfr_base[] = {
+        0xF8800000, 0xF8820000, 0xF8840000,
+        0xF8860000, 0xF8880000, 0xF88C0000,
+    };
     for (unsigned i = 0; i < 6; i++) {
         TC39XBCPUSFRState *sfr = &s->cpu_sfr[i];
         sfr->soc = s;
@@ -380,8 +388,7 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
         memory_region_init_io(&sfr->region, OBJECT(s), &tc39x_cpu_sfr_ops,
                               sfr, name, 0x20000);
         g_free(name);
-        memory_region_add_subregion(sysmem, 0xF8800000 + i * 0x20000,
-                                    &sfr->region);
+        memory_region_add_subregion(sysmem, cpu_sfr_base[i], &sfr->region);
     }
 
     /* IR MMIO: idx 0 = int_region (F0037000), idx 1 = src_region (F0038000) */
