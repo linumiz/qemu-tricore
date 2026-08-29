@@ -55,6 +55,7 @@ typedef struct TC39XBCPUSFRState {
     MemoryRegion region;
     uint32_t boot_pc;
     uint32_t bootcon;
+    uint32_t syscon;
 } TC39XBCPUSFRState;
 
 #define TC39XB_MEMDEV_CPU(n) \

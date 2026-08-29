@@ -38,6 +38,7 @@ static uint64_t tc39x_cpu_sfr_read(void *opaque, hwaddr offset,
     switch (offset) {
     case 0x1FE08: return s->boot_pc;
     case 0x1FE60: return s->bootcon;
+    case 0x1FE14: return s->syscon;
     default: return 0;
     }
 }
@@ -52,6 +53,15 @@ static void tc39x_cpu_sfr_write(void *opaque, hwaddr offset,
         break;
     case 0x1FE60:
         s->bootcon = value;
+        if (!(value & (1u << 24)) && s->id > 0) {
+            CPUState *cs = CPU(&s->soc->cpus[s->id]);
+            s->soc->cpus[s->id].env.PC = s->boot_pc;
+            cs->halted = 0;
+            cpu_resume(cs);
+        }
+        break;
+    case 0x1FE14:
+        s->syscon = value;
         if (!(value & 1) && s->id > 0) {
             CPUState *cs = CPU(&s->soc->cpus[s->id]);
             s->soc->cpus[s->id].env.PC = s->boot_pc;
@@ -365,6 +375,7 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
         sfr->soc = s;
         sfr->id = i;
         sfr->bootcon = i ? 1 : 0;
+        sfr->syscon = i ? (1u << 24) : 0;
         char *name = g_strdup_printf("tc39x-cpu%u-local-sfr", i);
         memory_region_init_io(&sfr->region, OBJECT(s), &tc39x_cpu_sfr_ops,
                               sfr, name, 0x20000);
