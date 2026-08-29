@@ -28,6 +28,7 @@ struct TC4xCPUState {
     MemoryRegion pspr;
     MemoryRegion dlmu;
     MemoryRegion pflash;
+    MemoryRegion pflash_alias;
 
     Clock *fcpu;
     Clock *fstm;

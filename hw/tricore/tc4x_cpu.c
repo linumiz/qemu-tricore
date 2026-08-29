@@ -132,6 +132,13 @@ static void tc4x_cpu_realize(DeviceState *dev, Error **errp)
     }
     memory_region_add_subregion(
         &s->container, 0x80000000 - (s->id * s->pflash_size), &s->pflash);
+    char *pflash_alias_name = g_strdup_printf("CPU%d_PFLASH_ALIAS", s->id);
+    memory_region_init_alias(&s->pflash_alias, OBJECT(s), pflash_alias_name,
+                             &s->pflash, 0, s->pflash_size);
+    free(pflash_alias_name);
+    memory_region_add_subregion(
+        &s->container, 0xA0000000 - (s->id * s->pflash_size),
+        &s->pflash_alias);
 
     char *dsprname = g_strdup_printf("CPU%d_DSPR", s->id);
     memory_region_init_ram(&s->dspr, NULL, dsprname, s->dpsr_size, errp);
