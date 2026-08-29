@@ -35,7 +35,7 @@ static uint64_t tc4x_cpu_sfr_stub_read(void *opaque, hwaddr offset,
     switch (offset) {
     case 0xD000: return s->krst0;
     case 0xD004: return s->krst1;
-    case 0x1FE08: return s->boot_pc >> 1;
+    case 0x1FE08: return s->boot_pc;
     case 0x1FE60: return s->bootcon;
     default: break;
     }
@@ -55,7 +55,7 @@ static void tc4x_cpu_sfr_stub_write(void *opaque, hwaddr offset,
         s->krst1 = value;
         break;
     case 0x1FE08:
-        s->boot_pc = value << 1;
+        s->boot_pc = value;
         break;
     case 0x1FE60:
         s->bootcon = value;

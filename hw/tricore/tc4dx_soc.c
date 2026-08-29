@@ -72,6 +72,9 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
             return;
         }
         if (i > 0) {
+            s->cpus[i].bootcon = 1;
+        }
+        if (i > 0) {
             /* Secondary TC4x cores reset in boot-halt mode.  The SSW reads
              * BOOTCON.BHALT before issuing the release write. */
             s->cpus[i].bootcon = 1;
