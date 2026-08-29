@@ -271,17 +271,29 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
 
     /* IR properties */
     qdev_prop_set_bit(DEVICE(s->irbus), "tc4x-mode", false);
-    qdev_prop_set_uint8(DEVICE(s->irbus), "num-isps", 4);
+    qdev_prop_set_uint8(DEVICE(s->irbus), "num-isps", 6);
     qdev_prop_set_uint16(DEVICE(s->irbus), "num-irqs", 1024);
 
     /* CPU needs IR link before realize */
-    object_property_set_link(OBJECT(&s->cpu), "ir",
+    object_property_set_link(OBJECT(&s->cpus[0]), "ir",
                              OBJECT(s->irbus), &error_abort);
 
-    qdev_realize(DEVICE(&s->cpu), NULL, &err);
+    qdev_realize(DEVICE(&s->cpus[0]), NULL, &err);
     if (err) {
         error_propagate(errp, err);
         return;
+    }
+
+    for (unsigned i = 1; i < 6; i++) {
+        DeviceState *core = DEVICE(&s->cpus[i]);
+        object_property_set_link(OBJECT(core), "ir", OBJECT(s->irbus),
+                                 &error_abort);
+        object_property_set_bool(OBJECT(core), "start-powered-off", true,
+                                 &error_abort);
+        if (!qdev_realize(core, NULL, &err)) {
+            error_propagate(errp, err);
+            return;
+        }
     }
 
     tc39x_soc_init_memory_mapping(dev_soc);
@@ -293,7 +305,7 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     clock_set_hz(fstm, 50000000);
     qdev_connect_clock_in(DEVICE(s->stm), "fstm", fstm);
 
-    object_property_add_const_link(OBJECT(s->scu), "cpu", OBJECT(&s->cpu));
+    object_property_add_const_link(OBJECT(s->scu), "cpu", OBJECT(&s->cpus[0]));
     qdev_prop_set_chr(DEVICE(s->asclin), "chardev", serial_hd(0));
 
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->sfr), &error_fatal);
@@ -314,7 +326,11 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
 
     /* IR ISP[0] -> CPU tricore.irq */
     qdev_connect_gpio_out_named(DEVICE(s->irbus), "isp", 0,
-        qdev_get_gpio_in_named(DEVICE(&s->cpu), "tricore.irq", 0));
+        qdev_get_gpio_in_named(DEVICE(&s->cpus[0]), "tricore.irq", 0));
+    for (unsigned i = 1; i < 6; i++) {
+        qdev_connect_gpio_out_named(DEVICE(s->irbus), "isp", i,
+            qdev_get_gpio_in_named(DEVICE(&s->cpus[i]), "tricore.irq", 0));
+    }
 
     /* ASCLIN0: sysbus 0=RXSR, 1=TXSR, 2=EXSR */
     sysbus_connect_irq(SYS_BUS_DEVICE(s->asclin), 0,
@@ -350,7 +366,12 @@ static void tc39x_soc_init(Object *obj)
     TC39XBSoCState *s = TC39XB_SOC(obj);
     TC39XBSoCClass *sc = TC39XB_SOC_GET_CLASS(s);
 
-    object_initialize_child(obj, "tc37x", &s->cpu, sc->cpu_type);
+    object_initialize_child(obj, "tc37x-cpu0", &s->cpus[0], sc->cpu_type);
+    for (unsigned i = 1; i < 6; i++) {
+        char *name = g_strdup_printf("tc37x-cpu%u", i);
+        object_initialize_child(obj, name, &s->cpus[i], sc->cpu_type);
+        g_free(name);
+    }
 }
 
 static void tc39x_soc_class_init(ObjectClass *klass, const void *data)

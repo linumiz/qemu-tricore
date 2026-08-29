@@ -102,7 +102,7 @@ static void triboard_machine_tc39xb_init(MachineState *machine)
     sysbus_realize(SYS_BUS_DEVICE(&ms->tc39xb_soc), &error_fatal);
 
     if (machine->kernel_filename) {
-        tricore_load_kernel(&ms->tc39xb_soc.cpu, machine->kernel_filename);
+        tricore_load_kernel(&ms->tc39xb_soc.cpus[0], machine->kernel_filename);
     }
 }
 

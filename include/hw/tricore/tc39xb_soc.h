@@ -85,7 +85,7 @@ typedef struct TC39XBSoCState {
     SysBusDevice parent_obj;
 
     /*< public >*/
-    TriCoreCPU cpu;
+    TriCoreCPU cpus[6];
 
     MemoryRegion dsprX;
     MemoryRegion psprX;
