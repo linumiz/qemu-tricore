@@ -168,6 +168,11 @@ static void tc27xd_soc_init_memory_mapping(DeviceState *dev_soc)
 #define TC27X_SRC_ASCLIN0_RX    (0x084 / 4) /* F0038084 */
 #define TC27X_SRC_ASCLIN0_ERR   (0x088 / 4) /* F0038088 */
 
+/* Reserved TC277 SRC nodes for later peripheral models. */
+#define TC27X_SRC_ETH           175
+#define TC27X_SRC_MCAN_BASE     176
+#define TC27X_SRC_MCAN_COUNT    16
+
 static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
 {
     TC27XDSoCState *s = TC27XD_SOC(dev_soc);
