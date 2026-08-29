@@ -63,8 +63,12 @@ static void triboard_machine_tc4d7_init(MachineState *machine)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
 
     if (machine->kernel_filename) {
-        tc4x_cpu_load_kernel(TC4DX_SOC(dev)->cpus[0].tricore,
-                             machine->kernel_filename, 0, 4 * MiB);
+        TC4DXSoCState *soc = TC4DX_SOC(dev);
+
+        for (unsigned i = 0; i < TC4DX_MAX_CPUS; i++) {
+            tc4x_cpu_load_kernel(soc->cpus[i].tricore,
+                                 machine->kernel_filename, 0, 4 * MiB);
+        }
     }
 }
 
