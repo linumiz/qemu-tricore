@@ -37,7 +37,7 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
     /* IR controller */
     dev = DEVICE(&s->ir);
     qdev_prop_set_bit(dev, "tc4x-mode", true);
-    qdev_prop_set_uint8(dev, "num-isps", 4);
+    qdev_prop_set_uint8(dev, "num-isps", TC4DX_MAX_CPUS);
     qdev_prop_set_uint16(dev, "num-irqs", 2048);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->ir), errp)) {
         return;
@@ -55,8 +55,14 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
     busdev = SYS_BUS_DEVICE(dev);
     sysbus_mmio_map(busdev, 0, 0xF0064000);
 
-    for (i = 0; i < 1; i++) {
-        memory_region_add_subregion(system_memory, 0, &s->cpus[0].container);
+    for (i = 0; i < TC4DX_MAX_CPUS; i++) {
+        /* The global system bus is exposed through CPU0. Other cores use
+         * their private local_container address spaces and must not be mapped
+         * into the same system address space. */
+        if (i == 0) {
+            memory_region_add_subregion(system_memory, 0,
+                                        &s->cpus[i].container);
+        }
         cpu = DEVICE(&s->cpus[i]);
         qdev_prop_set_string(cpu, "cpu-type", TRICORE_CPU_TYPE_NAME("tc4x"));
         qdev_prop_set_uint8(cpu, "cpu-id", i);
