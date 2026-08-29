@@ -23,6 +23,7 @@ struct TC4xCPUState {
 
     MemoryRegion container;
     MemoryRegion local_container;
+    MemoryRegion board_memory_alias;
     MemoryRegion sfr_stub;
     MemoryRegion dspr;
     MemoryRegion pspr;

@@ -116,8 +116,11 @@ static void tc4x_cpu_realize(DeviceState *dev, Error **errp)
         return;
     }
 
-    memory_region_add_subregion_overlap(&s->local_container, 0, s->board_memory,
-                                        -1);
+    memory_region_init_alias(&s->board_memory_alias, OBJECT(s),
+                             "tc4x-board-memory", s->board_memory, 0,
+                             memory_region_size(s->board_memory));
+    memory_region_add_subregion_overlap(&s->local_container, 0,
+                                        &s->board_memory_alias, -1);
     /* TODO: add mirror mememory */
 
     s->tricore = TRICORE_CPU(
