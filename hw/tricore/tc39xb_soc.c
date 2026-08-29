@@ -452,7 +452,7 @@ static void tc397b_soc_class_init(ObjectClass *oc, const void *data)
     sc->name         = "tc39xb-soc";
     sc->cpu_type     = TRICORE_CPU_TYPE_NAME("tc3x");
     sc->memmap       = tc39xb_soc_memmap;
-    sc->num_cpus     = 1;
+    sc->num_cpus     = 6;
 }
 
 static const TypeInfo tc39x_soc_types[] = {
