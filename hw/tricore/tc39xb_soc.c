@@ -271,8 +271,8 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
 
     /* IR properties */
     qdev_prop_set_bit(DEVICE(s->irbus), "tc4x-mode", false);
-    qdev_prop_set_uint8(DEVICE(s->irbus), "num-isps", 1);
-    qdev_prop_set_uint16(DEVICE(s->irbus), "num-irqs", 256);
+    qdev_prop_set_uint8(DEVICE(s->irbus), "num-isps", 4);
+    qdev_prop_set_uint16(DEVICE(s->irbus), "num-irqs", 1024);
 
     /* CPU needs IR link before realize */
     object_property_set_link(OBJECT(&s->cpu), "ir",

@@ -37,8 +37,8 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
     /* IR controller */
     dev = DEVICE(&s->ir);
     qdev_prop_set_bit(dev, "tc4x-mode", true);
-    qdev_prop_set_uint8(dev, "num-isps", 1);
-    qdev_prop_set_uint16(dev, "num-irqs", 256);
+    qdev_prop_set_uint8(dev, "num-isps", 4);
+    qdev_prop_set_uint16(dev, "num-irqs", 2048);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->ir), errp)) {
         return;
     }
