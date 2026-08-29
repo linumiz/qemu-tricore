@@ -49,6 +49,14 @@ typedef struct TC39XBSoCCPUMemState {
 
 } TC39XBSoCCPUMemState;
 
+typedef struct TC39XBCPUSFRState {
+    struct TC39XBSoCState *soc;
+    unsigned id;
+    MemoryRegion region;
+    uint32_t boot_pc;
+    uint32_t bootcon;
+} TC39XBCPUSFRState;
+
 #define TC39XB_MEMDEV_CPU(n) \
     TC39XB_DSPR##n,      \
     TC39XB_DCACHE##n,    \
@@ -96,6 +104,7 @@ typedef struct TC39XBSoCState {
     TC39XBSoCCPUMemState cpu3mem;
     TC39XBSoCCPUMemState cpu4mem;
     TC39XBSoCCPUMemState cpu5mem;
+    TC39XBCPUSFRState cpu_sfr[6];
     TC39XBSoCFlashMemState flashmem;
     
     TriCoreIRState *irbus;

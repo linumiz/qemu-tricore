@@ -29,6 +29,48 @@
 
 #include "hw/tricore/tc39xb_soc.h"
 #include "hw/tricore/triboard.h"
+#include "qemu/log.h"
+
+static uint64_t tc39x_cpu_sfr_read(void *opaque, hwaddr offset,
+                                   unsigned size)
+{
+    TC39XBCPUSFRState *s = opaque;
+    switch (offset) {
+    case 0x1FE08: return s->boot_pc;
+    case 0x1FE60: return s->bootcon;
+    default: return 0;
+    }
+}
+
+static void tc39x_cpu_sfr_write(void *opaque, hwaddr offset,
+                                uint64_t value, unsigned size)
+{
+    TC39XBCPUSFRState *s = opaque;
+    switch (offset) {
+    case 0x1FE08:
+        s->boot_pc = value;
+        break;
+    case 0x1FE60:
+        s->bootcon = value;
+        if (!(value & 1) && s->id > 0) {
+            CPUState *cs = CPU(&s->soc->cpus[s->id]);
+            s->soc->cpus[s->id].env.PC = s->boot_pc;
+            cs->halted = 0;
+            cpu_resume(cs);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+static const MemoryRegionOps tc39x_cpu_sfr_ops = {
+    .read = tc39x_cpu_sfr_read,
+    .write = tc39x_cpu_sfr_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid.min_access_size = 1,
+    .valid.max_access_size = 4,
+};
 
 
 const MemmapEntry tc39xb_soc_memmap[] = {
@@ -319,10 +361,16 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
      * Map the documented local window explicitly so startup accesses are
      * visible as unimplemented instead of falling through an unmapped hole. */
     for (unsigned i = 0; i < 6; i++) {
+        TC39XBCPUSFRState *sfr = &s->cpu_sfr[i];
+        sfr->soc = s;
+        sfr->id = i;
+        sfr->bootcon = i ? 1 : 0;
         char *name = g_strdup_printf("tc39x-cpu%u-local-sfr", i);
-        create_unimplemented_device(name, 0xF8800000 + i * 0x20000,
-                                    0x20000);
+        memory_region_init_io(&sfr->region, OBJECT(s), &tc39x_cpu_sfr_ops,
+                              sfr, name, 0x20000);
         g_free(name);
+        memory_region_add_subregion(sysmem, 0xF8800000 + i * 0x20000,
+                                    &sfr->region);
     }
 
     /* IR MMIO: idx 0 = int_region (F0037000), idx 1 = src_region (F0038000) */
