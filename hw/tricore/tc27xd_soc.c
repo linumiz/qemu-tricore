@@ -162,11 +162,11 @@ static void tc27xd_soc_init_memory_mapping(DeviceState *dev_soc)
     make_alias(&f->lmuram_u,  "LMURAM.U", &f->lmuram_c, map[TC27XD_LMURAM_U].base);
 }
 
-/* TC2x/TC3x SRC node indices (byte offset into SRC space / 4) */
-#define TC27X_SRC_STM0_SR0      0xC0
-#define TC27X_SRC_ASCLIN0_TX    0x14
-#define TC27X_SRC_ASCLIN0_RX    0x15
-#define TC27X_SRC_ASCLIN0_ERR   0x16
+/* TC277 SRC offsets from MODULE_SRC (F0038000), converted to SRN indices. */
+#define TC27X_SRC_STM0_SR0      (0x490 / 4) /* F0038490 */
+#define TC27X_SRC_ASCLIN0_TX    (0x080 / 4) /* F0038080 */
+#define TC27X_SRC_ASCLIN0_RX    (0x084 / 4) /* F0038084 */
+#define TC27X_SRC_ASCLIN0_ERR   (0x088 / 4) /* F0038088 */
 
 static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
 {
