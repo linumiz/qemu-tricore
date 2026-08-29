@@ -129,6 +129,9 @@ static void tc4x_cpu_realize(DeviceState *dev, Error **errp)
         error_propagate(errp, err);
         return;
     }
+    /* Nested CPUs must have stable distinct indices; migration registration
+     * uses this value to distinguish the per-core CPU state streams. */
+    CPU(s->tricore)->cpu_index = s->id;
 
     object_property_set_link(OBJECT(s->tricore), "memory",
                              OBJECT(&s->local_container), &error_abort);
@@ -223,16 +226,36 @@ static const Property tc4x_cpu_properties[] = {
     DEFINE_PROP_UINT32("pflash-size", TC4xCPUState, pflash_size, 4 * MiB),
 };
 
+static int tc4x_cpu_post_load(void *opaque, int version_id)
+{
+    TC4xCPUState *s = opaque;
+    if (s->tricore && (s->migration_running || s->id > 0)) {
+        CPU(s->tricore)->halted = 0;
+        cpu_resume(CPU(s->tricore));
+    }
+    return 0;
+}
+
+static int tc4x_cpu_pre_save(void *opaque)
+{
+    TC4xCPUState *s = opaque;
+    s->migration_running = s->tricore && !CPU(s->tricore)->halted;
+    return 0;
+}
+
 static const VMStateDescription vmstate_tc4x_cpu = {
     .name = "tc4x_cpu",
     .version_id = 1,
     .minimum_version_id = 1,
+    .pre_save = tc4x_cpu_pre_save,
+    .post_load = tc4x_cpu_post_load,
     .fields = (const VMStateField[]){ VMSTATE_CLOCK(fstm, TC4xCPUState),
                                       VMSTATE_CLOCK(fcpu, TC4xCPUState),
                                       VMSTATE_UINT32(bootcon, TC4xCPUState),
                                       VMSTATE_UINT32(boot_pc, TC4xCPUState),
                                       VMSTATE_UINT32(krst0, TC4xCPUState),
                                       VMSTATE_UINT32(krst1, TC4xCPUState),
+                                      VMSTATE_UINT8(migration_running, TC4xCPUState),
                                       VMSTATE_END_OF_LIST() }
 };
 

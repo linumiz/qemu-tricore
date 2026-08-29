@@ -42,6 +42,7 @@ struct TC4xCPUState {
     uint32_t bootcon;
     uint32_t krst0;
     uint32_t krst1;
+    uint8_t migration_running;
 
     char *cpu_type;
     MemoryRegion *board_memory;
