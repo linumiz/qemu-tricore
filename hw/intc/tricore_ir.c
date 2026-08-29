@@ -266,6 +266,16 @@ static void tricore_ir_realize(DeviceState *dev, Error **errp)
 {
     struct TriCoreIRState *pv = TRICORE_IR(dev);
 
+    if (pv->num_isps == 0 || pv->num_isps > ARRAY_SIZE(pv->lwsr)) {
+        error_setg(errp, "tricore_ir: num-isps must be between 1 and %zu",
+                   ARRAY_SIZE(pv->lwsr));
+        return;
+    }
+    if (pv->num_irqs == 0 || pv->num_irqs > 0x1000) {
+        error_setg(errp, "tricore_ir: num-irqs must be between 1 and 4096");
+        return;
+    }
+
     pv->src_regs = g_malloc0_n(pv->num_irqs, sizeof(uint32_t));
     pv->isp_irqs = g_malloc_n(pv->num_isps, sizeof(qemu_irq));
     qdev_init_gpio_in_named(DEVICE(pv), irq_handler, "irq", pv->num_irqs);
