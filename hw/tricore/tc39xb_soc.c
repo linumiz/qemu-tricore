@@ -310,6 +310,9 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
 
     s->irbus = TRICORE_IR(object_new(TYPE_TRICORE_IR));
     s->asclin = TRICORE_ASCLIN(object_new(TYPE_TRICORE_ASCLIN));
+    for (unsigned i = 0; i < 11; i++) {
+        s->asclin_extra[i] = TRICORE_ASCLIN(object_new(TYPE_TRICORE_ASCLIN));
+    }
     s->virt = TRICORE_VIRT(object_new(TYPE_TRICORE_VIRT));
     s->scu = TRICORE_SCU(object_new(TYPE_TRICORE_SCU));
     s->stm = TRICORE_STM(object_new(TYPE_TRICORE_STM));
@@ -318,6 +321,12 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     /* Parent all devices so sysbus_realize_and_unref does not free them */
     object_property_add_child(OBJECT(dev_soc), "irbus", OBJECT(s->irbus));
     object_property_add_child(OBJECT(dev_soc), "asclin", OBJECT(s->asclin));
+    for (unsigned i = 0; i < 11; i++) {
+        char *name = g_strdup_printf("asclin%u", i + 1);
+        object_property_add_child(OBJECT(dev_soc), name,
+                                   OBJECT(s->asclin_extra[i]));
+        g_free(name);
+    }
     object_property_add_child(OBJECT(dev_soc), "virt", OBJECT(s->virt));
     object_property_add_child(OBJECT(dev_soc), "scu", OBJECT(s->scu));
     object_property_add_child(OBJECT(dev_soc), "stm", OBJECT(s->stm));
@@ -368,6 +377,11 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->irbus), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->virt), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->asclin), &error_fatal);
+    for (unsigned i = 0; i < 11; i++) {
+        DeviceState *extra = DEVICE(s->asclin_extra[i]);
+        qdev_prop_set_chr(extra, "chardev", serial_hd(i + 1));
+        sysbus_realize_and_unref(SYS_BUS_DEVICE(extra), &error_fatal);
+    }
 
     /* TC3x CPU-local SFRs (including CPUx_KRST0/KRST1) are not modeled yet.
      * Map the documented local window explicitly so startup accesses are
@@ -424,6 +438,20 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
                                         &s->sfr->iomem, -1);
     memory_region_add_subregion(sysmem, sc->memmap[TC39XB_ASCLIN].base,
                                 &s->asclin->iomem);
+    for (unsigned i = 0; i < 11; i++) {
+        memory_region_add_subregion(sysmem,
+            sc->memmap[TC39XB_ASCLIN].base + 0x200 * (i + 1),
+            &s->asclin_extra[i]->iomem);
+        sysbus_connect_irq(SYS_BUS_DEVICE(s->asclin_extra[i]), 0,
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                   TC3X_SRC_ASCLIN0_RX + 3 * (i + 1)));
+        sysbus_connect_irq(SYS_BUS_DEVICE(s->asclin_extra[i]), 1,
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                   TC3X_SRC_ASCLIN0_TX + 3 * (i + 1)));
+        sysbus_connect_irq(SYS_BUS_DEVICE(s->asclin_extra[i]), 2,
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                   TC3X_SRC_ASCLIN0_ERR + 3 * (i + 1)));
+    }
     memory_region_add_subregion(sysmem, sc->memmap[TC39XB_VIRT].base,
                                 &s->virt->iomem);
     memory_region_add_subregion(sysmem, sc->memmap[TC39XB_SCU].base,
