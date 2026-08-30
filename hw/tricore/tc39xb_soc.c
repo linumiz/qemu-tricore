@@ -317,6 +317,7 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     s->scu = TRICORE_SCU(object_new(TYPE_TRICORE_SCU));
     s->stm = TRICORE_STM(object_new(TYPE_TRICORE_STM));
     s->sfr = TRICORE_SFR(object_new(TYPE_TRICORE_SFR));
+    s->mcan = TRICORE_MCAN(object_new(TYPE_TRICORE_MCAN));
 
     /* Parent all devices so sysbus_realize_and_unref does not free them */
     object_property_add_child(OBJECT(dev_soc), "irbus", OBJECT(s->irbus));
@@ -331,6 +332,7 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     object_property_add_child(OBJECT(dev_soc), "scu", OBJECT(s->scu));
     object_property_add_child(OBJECT(dev_soc), "stm", OBJECT(s->stm));
     object_property_add_child(OBJECT(dev_soc), "sfr", OBJECT(s->sfr));
+    object_property_add_child(OBJECT(dev_soc), "mcan", OBJECT(s->mcan));
 
     /* IR properties */
     qdev_prop_set_bit(DEVICE(s->irbus), "tc4x-mode", false);
@@ -370,6 +372,10 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
 
     object_property_add_const_link(OBJECT(s->scu), "cpu", OBJECT(&s->cpus[0]));
     qdev_prop_set_chr(DEVICE(s->asclin), "chardev", serial_hd(0));
+    if (s->canbus) {
+        object_property_set_link(OBJECT(s->mcan), "canbus",
+                                 OBJECT(s->canbus), &error_abort);
+    }
 
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->sfr), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->scu), &error_fatal);
@@ -377,6 +383,7 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->irbus), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->virt), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->asclin), &error_fatal);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->mcan), &error_fatal);
     for (unsigned i = 0; i < 11; i++) {
         DeviceState *extra = DEVICE(s->asclin_extra[i]);
         qdev_prop_set_chr(extra, "chardev", serial_hd(i + 1));
@@ -438,6 +445,8 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
                                         &s->sfr->iomem, -1);
     memory_region_add_subregion(sysmem, sc->memmap[TC39XB_ASCLIN].base,
                                 &s->asclin->iomem);
+    /* TC3xx MCMCAN0 control window (iLLD/User Manual base). */
+    memory_region_add_subregion(sysmem, 0xF0200000, &s->mcan->iomem);
     for (unsigned i = 0; i < 11; i++) {
         memory_region_add_subregion(sysmem,
             sc->memmap[TC39XB_ASCLIN].base + 0x200 * (i + 1),
@@ -473,11 +482,18 @@ static void tc39x_soc_init(Object *obj)
     }
 }
 
+static Property tc39xb_soc_props[] = {
+    DEFINE_PROP_LINK("canbus", TC39XBSoCState, canbus,
+                     TYPE_CAN_BUS, CanBusState *),
+};
+
 static void tc39x_soc_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = tc39x_soc_realize;
+    device_class_set_props_n(dc, tc39xb_soc_props,
+                             ARRAY_SIZE(tc39xb_soc_props));
 }
 
 static void tc397b_soc_class_init(ObjectClass *oc, const void *data)

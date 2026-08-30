@@ -145,6 +145,10 @@ static void triboard_machine_tc39xb_init(MachineState *machine)
 
     object_initialize_child(OBJECT(machine), "tc39xb_soc", &ms->tc39xb_soc,
                             amc->soc_name);
+    if (ms->canbus) {
+        object_property_set_link(OBJECT(&ms->tc39xb_soc), "canbus",
+                                 OBJECT(ms->canbus), &error_fatal);
+    }
     sysbus_realize(SYS_BUS_DEVICE(&ms->tc39xb_soc), &error_fatal);
 
     if (machine->kernel_filename) {
