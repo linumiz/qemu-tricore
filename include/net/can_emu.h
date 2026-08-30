@@ -151,6 +151,11 @@ ssize_t can_bus_arbitrate_clients(CanBusClientState *const *senders,
                                   const uint8_t *streams, size_t sender_count,
                                   size_t stream_stride, size_t bit_count);
 
+ssize_t can_bus_sample_clients(CanBusClientState *const *senders,
+                               size_t sender_count, const uint8_t *streams,
+                               size_t stream_stride, size_t bit_count,
+                               uint64_t bit_time_ns, uint64_t start_time_ns);
+
 int can_bus_client_set_filters(CanBusClientState *,
                                const struct qemu_can_filter *filters,
                                size_t filters_cnt);

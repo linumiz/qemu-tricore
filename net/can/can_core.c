@@ -286,6 +286,33 @@ ssize_t can_bus_arbitrate_clients(CanBusClientState *const *senders,
     return winner;
 }
 
+ssize_t can_bus_sample_clients(CanBusClientState *const *senders,
+                               size_t sender_count, const uint8_t *streams,
+                               size_t stream_stride, size_t bit_count,
+                               uint64_t bit_time_ns, uint64_t start_time_ns)
+{
+    if (!senders || !streams || !sender_count || sender_count > 16 ||
+        !stream_stride || !bit_count || !bit_time_ns) {
+        return -1;
+    }
+    for (size_t bit = 0; bit < bit_count; bit++) {
+        bool drives[16];
+        for (size_t i = 0; i < sender_count; i++) {
+            drives[i] = (streams[i * stream_stride + bit / 8] >> (bit % 8)) & 1;
+        }
+        CanBusBitSample sample = {
+            .level = can_bus_wired_and(drives, sender_count),
+            .timestamp_ns = start_time_ns + bit * bit_time_ns,
+        };
+        for (size_t i = 0; i < sender_count; i++) {
+            if (senders[i]->bit_info && senders[i]->bit_info->sample) {
+                senders[i]->bit_info->sample(senders[i], &sample);
+            }
+        }
+    }
+    return bit_count;
+}
+
 int can_bus_filter_match(struct qemu_can_filter *filter, qemu_canid_t can_id)
 {
     int m;
