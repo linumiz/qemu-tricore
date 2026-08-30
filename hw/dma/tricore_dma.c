@@ -19,6 +19,17 @@
 #define DMA_STAT_EOL BIT(3)
 #define DMA_CTL_CHAIN BIT(2)
 #define DMA_CTL_REQ_ENABLE BIT(3)
+#define DMA_STAT_ACCESS_ERROR BIT(4)
+#define DMA_STAT_BUS_ERROR BIT(5)
+
+const uint8_t tricore_dma_request_matrix[3][4] = {
+    { TRICORE_DMA_REQ_ASCLIN0, TRICORE_DMA_REQ_MCAN0,
+      TRICORE_DMA_REQ_ERAY0, TRICORE_DMA_REQ_ETH },
+    { TRICORE_DMA_REQ_ASCLIN0, TRICORE_DMA_REQ_MCAN0,
+      TRICORE_DMA_REQ_ERAY0, TRICORE_DMA_REQ_ETH },
+    { TRICORE_DMA_REQ_ASCLIN0, TRICORE_DMA_REQ_MCAN0,
+      TRICORE_DMA_REQ_ERAY0, TRICORE_DMA_REQ_ETH },
+};
 
 static uint64_t dma_read(void *opaque, hwaddr off, unsigned size)
 {
@@ -26,7 +37,9 @@ static uint64_t dma_read(void *opaque, hwaddr off, unsigned size)
     switch (off) { case DMA_SRC: return s->src; case DMA_DST: return s->dst;
     case DMA_LEN: return s->length; case DMA_CTL: return s->control;
     case DMA_STAT: return s->status; case 0x14: return s->descriptor;
-    case 0x18: return s->request;
+    case 0x18: return s->request; case 0x1c: return s->accen;
+    case 0x20: return s->error_enable; case 0x24: return s->status;
+    case 0x28: return s->priority;
     default: return 0; }
 }
 
@@ -41,9 +54,20 @@ static void dma_write(void *opaque, hwaddr off, uint64_t value, unsigned size)
                                              DMA_STAT_DESC_ERROR | DMA_STAT_EOL)); break;
     case 0x14: s->descriptor = value; break;
     case 0x18: s->request = value & 0xff; break;
+    case 0x1c: s->accen = value; break;
+    case 0x20: s->error_enable = value & (DMA_STAT_ACCESS_ERROR | DMA_STAT_BUS_ERROR); break;
+    case 0x24: s->status &= ~value; break;
+    case 0x28: s->priority = value & 0xff; break;
     case DMA_CTL:
         s->control = value & (DMA_CTL_START | DMA_CTL_IRQ | DMA_CTL_CHAIN |
                                DMA_CTL_REQ_ENABLE);
+        if ((value & DMA_CTL_START) && !(s->accen & 1)) {
+            s->status = DMA_STAT_ACCESS_ERROR;
+            if ((s->error_enable & DMA_STAT_ACCESS_ERROR) && (value & DMA_CTL_IRQ)) {
+                qemu_set_irq(s->irq, 1); qemu_set_irq(s->irq, 0);
+            }
+            break;
+        }
         if (value & DMA_CTL_START) {
             MemTxResult r = MEMTX_OK;
             unsigned count = 0;
@@ -105,8 +129,23 @@ static void dma_init(Object *obj)
     sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq);
 }
 
+static void dma_reset(DeviceState *dev)
+{
+    TriCoreDMAState *s = TRICORE_DMA(dev);
+    s->src = s->dst = s->length = s->control = s->status = 0;
+    s->descriptor = s->request = 0;
+    s->accen = 0xffffffffu;
+    s->error_enable = DMA_STAT_ACCESS_ERROR | DMA_STAT_BUS_ERROR;
+    s->priority = 0;
+}
+
+static void dma_class_init(ObjectClass *klass, const void *data)
+{
+    device_class_set_legacy_reset(DEVICE_CLASS(klass), dma_reset);
+}
+
 static const TypeInfo dma_type = { .name = TYPE_TRICORE_DMA,
     .parent = TYPE_SYS_BUS_DEVICE, .instance_size = sizeof(TriCoreDMAState),
-    .instance_init = dma_init };
+    .instance_init = dma_init, .class_init = dma_class_init };
 static void dma_register_types(void) { type_register_static(&dma_type); }
 type_init(dma_register_types)

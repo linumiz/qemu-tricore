@@ -10,12 +10,15 @@ enum TriCoreDMARequest {
     TRICORE_DMA_REQ_ERAY0 = 32, TRICORE_DMA_REQ_ETH = 48,
 };
 void tricore_dma_request(TriCoreDMAState *s, uint32_t request);
+/* Public request matrix IDs shared by TC2x/TC3x/TC4x profiles. */
+extern const uint8_t tricore_dma_request_matrix[3][4];
 
 struct TriCoreDMAState {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
     qemu_irq irq;
     uint32_t src, dst, length, control, status, descriptor, request;
+    uint32_t accen, error_enable, priority;
 };
 
 #endif
