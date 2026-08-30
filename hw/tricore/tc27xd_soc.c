@@ -136,6 +136,8 @@ const MemmapEntry tc27xd_soc_memmap[] = {
     [TC27XD_SFR]       = { 0xF0000000,                  0x0 },
     [TC27XD_STM]       = { 0xF0000000,                  0x0 },
     [TC27XD_ASCLIN]    = { 0xF0000600,                  0x0 },
+    /* TC27D iLLD/User Manual: MODULE_CAN at F0018000. */
+    [TC27XD_MCAN]      = { 0xF0018000,              0x100 },
     [TC27XD_SCU]       = { 0xF0036000,                  0x0 },
     [TC27XD_IRBUS]     = { 0xF0038000,                  0x0 },
 };
@@ -263,6 +265,7 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     s->scu = TRICORE_SCU(object_new(TYPE_TRICORE_SCU));
     s->stm = TRICORE_STM(object_new(TYPE_TRICORE_STM));
     s->sfr = TRICORE_SFR(object_new(TYPE_TRICORE_SFR));
+    s->mcan = TRICORE_MCAN(object_new(TYPE_TRICORE_MCAN));
 
     object_property_add_child(OBJECT(dev_soc), "irbus", OBJECT(s->irbus));
     object_property_add_child(OBJECT(dev_soc), "asclin", OBJECT(s->asclin));
@@ -276,6 +279,7 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     object_property_add_child(OBJECT(dev_soc), "scu", OBJECT(s->scu));
     object_property_add_child(OBJECT(dev_soc), "stm", OBJECT(s->stm));
     object_property_add_child(OBJECT(dev_soc), "sfr", OBJECT(s->sfr));
+    object_property_add_child(OBJECT(dev_soc), "mcan", OBJECT(s->mcan));
 
     qdev_prop_set_bit(DEVICE(s->irbus), "tc4x-mode", false);
     qdev_prop_set_bit(DEVICE(s->irbus), "tc27x-mode", true);
@@ -307,6 +311,10 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
 
     object_property_add_const_link(OBJECT(s->scu), "cpu", OBJECT(&s->cpus[0]));
     qdev_prop_set_chr(DEVICE(s->asclin), "chardev", serial_hd(0));
+    if (s->canbus) {
+        object_property_set_link(OBJECT(s->mcan), "canbus",
+                                  OBJECT(s->canbus), &error_abort);
+    }
 
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->sfr), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->scu), &error_fatal);
@@ -314,6 +322,7 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->irbus), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->virt), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->asclin), &error_fatal);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->mcan), &error_fatal);
     for (unsigned i = 0; i < 3; i++) {
         DeviceState *extra = DEVICE(s->asclin_extra[i]);
         qdev_prop_set_chr(extra, "chardev", serial_hd(i + 1));
@@ -359,10 +368,16 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
         qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
                                TC27X_SRC_STM0_SR0));
 
+    /* MultiCAN0 interrupt 0 is the first of the documented CAN SRC nodes. */
+    sysbus_connect_irq(SYS_BUS_DEVICE(s->mcan), 0,
+        qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", TC27X_SRC_MCAN_BASE));
+
     memory_region_add_subregion_overlap(sysmem, sc->memmap[TC27XD_SFR].base,
                                         &s->sfr->iomem, -1);
     memory_region_add_subregion(sysmem, sc->memmap[TC27XD_ASCLIN].base,
                                 &s->asclin->iomem);
+    memory_region_add_subregion(sysmem, sc->memmap[TC27XD_MCAN].base,
+                                &s->mcan->iomem);
     for (unsigned i = 0; i < 3; i++) {
         memory_region_add_subregion(sysmem,
             sc->memmap[TC27XD_ASCLIN].base + 0x200 * (i + 1),
@@ -412,6 +427,10 @@ static void tc27xd_soc_class_init(ObjectClass *klass, const void *data)
 
     dc->realize = tc27xd_soc_realize;
     dc->legacy_reset = tc27xd_soc_reset;
+    device_class_set_props_n(dc, (Property[]) {
+        DEFINE_PROP_LINK("canbus", TC27XDSoCState, canbus,
+                         TYPE_CAN_BUS, CanBusState *),
+    }, 1);
 }
 
 static void tc277d_soc_class_init(ObjectClass *oc, const void *data)

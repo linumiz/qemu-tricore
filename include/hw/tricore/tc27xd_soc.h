@@ -32,6 +32,7 @@
 #include "hw/intc/tricore_ir.h"
 #include "hw/timer/tricore_stm.h"
 #include "hw/char/tricore_asclin.h"
+#include "hw/net/tricore_mcan.h"
 #include "hw/tricore/tc_soc.h"
 
 #define TYPE_TC27XD_SOC ("tc27xd-soc")
@@ -96,6 +97,8 @@ typedef struct TC27XDSoCState {
     TriCoreSTMState *stm;
     TriCoreASCLINState *asclin;
     TriCoreASCLINState *asclin_extra[3];
+    TriCoreMCANState *mcan;
+    CanBusState *canbus;
     TriCoreSFRState *sfr;
 
     TC27XDSoCFlashMemState flashmem;
@@ -150,6 +153,7 @@ enum {
     TC27XD_SCU,
     TC27XD_STM,
     TC27XD_ASCLIN,
+    TC27XD_MCAN,
 };
 
 #endif
