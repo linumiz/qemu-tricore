@@ -52,6 +52,24 @@ static void test_eray_profiles(void)
     qtest_writel(global_qtest, 0xF001C104, 0x80);
     qtest_writel(global_qtest, 0xF001C118, 3); /* cold-start */
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C100), ==, 0x0d);
+    /* TC2x acceptance: slot boundaries and FIFO controls retain their masks. */
+    qtest_writel(global_qtest, 0xF001C134, 4);
+    qtest_writel(global_qtest, 0xF001C138, 5);
+    qtest_writel(global_qtest, 0xF001C13C, 2);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C134), ==, 4);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C138), ==, 5);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C13C), ==, 2);
+    qtest_writel(global_qtest, 0xF001C15C, 1); /* FIFO first buffer */
+    qtest_writel(global_qtest, 0xF001C160, 2); /* FIFO depth */
+    qtest_writel(global_qtest, 0xF001C174, 1); /* critical level */
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C160), ==, 2);
+    /* Popping an empty FIFO raises CCEV and the TC2x INT0 SRC request. */
+    qtest_writel(global_qtest, 0xF001C128, 1u << 4);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C104) & (1u << 6), !=, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0038000 + 160 * 4) &
+                     (1u << 24), !=, 0);
+    qtest_writel(global_qtest, 0xF001C104, 1u << 6); /* CCEV W1C */
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C104) & (1u << 6), ==, 0);
     qtest_writel(global_qtest, 0xF001C118, 5); /* halt */
     qtest_writel(global_qtest, 0xF001C118, 8); /* warm-start */
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C100), ==, 0x0d);
