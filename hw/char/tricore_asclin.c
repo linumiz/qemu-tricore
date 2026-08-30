@@ -127,6 +127,12 @@ static bool asclin_lin_mode(TriCoreASCLINState *s)
     return ((s->regs[FRAMECON] >> 0) & 0x7) == 3;
 }
 
+static bool asclin_lin_master(TriCoreASCLINState *s)
+{
+    /* LINCON.MS (bit 26): 1 = master, 0 = slave. */
+    return (s->regs[LINCON] & (1u << 26)) != 0;
+}
+
 static void asclin_lin_bus_receive(TriCoreASCLINState *s, uint8_t byte)
 {
     if (asclin_buffer_free(s) == 0) {
@@ -196,12 +202,18 @@ static void asclin_txdata_write(TriCoreASCLINState *s, uint32_t value)
         }
     }
 
-    if (asclin_lin_mode(s) && asclin_lin_bus) {
+    /* A master starts a header; a slave may transmit only while a response
+     * is pending (RR was set by receipt of the preceding header/bytes). */
+    if (asclin_lin_mode(s) && asclin_lin_bus &&
+        (asclin_lin_master(s) || (s->regs[FLAGS] & MASK_FLAGS_RR))) {
         for (guint i = 0; i < asclin_lin_bus->len; i++) {
             TriCoreASCLINState *peer = g_ptr_array_index(asclin_lin_bus, i);
             if (peer != s && asclin_lin_mode(peer)) {
                 asclin_lin_bus_receive(peer, value);
             }
+        }
+        if (!asclin_lin_master(s)) {
+            qatomic_and(&s->regs[FLAGS], ~MASK_FLAGS_RR);
         }
     }
 
