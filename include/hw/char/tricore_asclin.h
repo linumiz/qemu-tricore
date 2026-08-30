@@ -17,6 +17,7 @@
 #include "hw/core/qdev-properties.h"
 #include "chardev/char-fe.h"
 #include "hw/core/ptimer.h"
+#include "qemu/timer.h"
 
 enum {
     STAT_THRE = (1 << 0), STAT_RX_EVT = (1 << 1), STAT_TX_EVT = (1 << 2),
@@ -116,6 +117,8 @@ struct TriCoreASCLINState {
     uint8_t lin_response_length;
     bool lin_checksum_enhanced;
     ptimer_state *ptimer;
+    QEMUTimer *lin_timeout_timer;
+    bool lin_timeout_response;
     QEMUBH *bh;
 };
 typedef struct TriCoreASCLINState TriCoreASCLINState;

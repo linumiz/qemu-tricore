@@ -127,6 +127,39 @@ static void asclin_pulse_irq(TriCoreASCLINState *s, uint32_t pulse_mask)
     }
 }
 
+static void asclin_lin_timeout_expire(void *opaque)
+{
+    TriCoreASCLINState *s = opaque;
+    uint32_t flag = s->lin_timeout_response ? MASK_FLAGS_RT : MASK_FLAGS_HT;
+    qatomic_or(&s->regs[FLAGS], flag);
+    asclin_pulse_irq(s, flag);
+}
+
+static void asclin_lin_timeout_start(TriCoreASCLINState *s, bool response)
+{
+    uint32_t threshold = response ? ((s->regs[DATCON] >> 16) & 0xff) :
+                                    (s->regs[LINHTIMER] & 0xff);
+    uint32_t prescaler = (s->regs[BITCON] & 0xfff) + 1;
+    uint32_t oversampling = ((s->regs[BITCON] >> 16) & 0xf) + 1;
+    uint32_t brg = s->regs[BRG] & 0xfff;
+    uint64_t baud = brg ? (100000000ULL / (prescaler * oversampling * brg)) : 115200;
+    uint64_t ns;
+
+    if (!s->lin_timeout_timer || !threshold || !baud) {
+        return;
+    }
+    s->lin_timeout_response = response;
+    ns = (uint64_t)threshold * 10 * 1000000000ULL / baud;
+    timer_mod(s->lin_timeout_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + ns);
+}
+
+static void asclin_lin_timeout_stop(TriCoreASCLINState *s)
+{
+    if (s->lin_timeout_timer) {
+        timer_del(s->lin_timeout_timer);
+    }
+}
+
 static bool asclin_lin_mode(TriCoreASCLINState *s)
 {
     /* FRAMECON.MODE=3 is LIN (TC2x/TC3x ASCLIN definition). */
@@ -170,10 +203,12 @@ static void asclin_lin_gateway_end(TriCoreASCLINState *s)
 
 static void asclin_lin_bus_break(TriCoreASCLINState *s)
 {
+    asclin_lin_timeout_stop(s);
     s->lin_sync_seen = false;
     s->lin_pid_seen = false;
     s->lin_data_count = 0;
     s->lin_checksum_sum = 0;
+    asclin_lin_timeout_start(s, false);
     qatomic_or(&s->regs[FLAGS], MASK_FLAGS_LIN_BREAK);
     asclin_pulse_irq(s, MASK_FLAGS_LIN_BREAK);
 }
@@ -185,6 +220,7 @@ static void asclin_lin_bus_receive(TriCoreASCLINState *s, uint8_t byte)
         s->lin_pid_seen = false;
     } else if (s->lin_sync_seen && !s->lin_pid_seen) {
         s->lin_pid_seen = true;
+        asclin_lin_timeout_start(s, true);
         s->lin_data_count = 0;
         s->lin_checksum_sum = (s->regs[LINCON] & (1u << 25) &&
                                s->lin_checksum_enhanced) ? byte : 0;
@@ -204,6 +240,7 @@ static void asclin_lin_bus_receive(TriCoreASCLINState *s, uint8_t byte)
         s->lin_pid_seen = false;
         s->lin_data_count = 0;
         s->lin_checksum_sum = 0;
+        asclin_lin_timeout_stop(s);
         return;
     }
 
@@ -217,6 +254,10 @@ static void asclin_lin_bus_receive(TriCoreASCLINState *s, uint8_t byte)
     if (s->lin_pid_seen && s->lin_data_count < s->lin_response_length) {
         s->lin_checksum_sum += byte;
         s->lin_data_count++;
+        if (!(s->regs[LINCON] & (1u << 25)) &&
+            s->lin_data_count >= s->lin_response_length) {
+            asclin_lin_timeout_stop(s);
+        }
     }
     qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RFL | MASK_FLAGS_RR | MASK_FLAGS_RH);
     asclin_pulse_irq(s, MASK_FLAGS_RFL);
@@ -838,6 +879,11 @@ static void asclin_uart_unrealize(DeviceState *dev)
     }
     qemu_chr_fe_set_handlers(&s->chr, NULL, NULL, NULL, NULL,
                              NULL, NULL, false);
+    if (s->lin_timeout_timer) {
+        timer_del(s->lin_timeout_timer);
+        timer_free(s->lin_timeout_timer);
+        s->lin_timeout_timer = NULL;
+    }
 }
 
 static void asclin_uart_init(Object *obj)
@@ -853,6 +899,8 @@ static void asclin_uart_init(Object *obj)
     sysbus_init_irq(sbd, &s->EXSR);
     s->rxbufreadidx = 0;
     s->rxbufwriteidx = 0;
+    s->lin_timeout_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
+                                        asclin_lin_timeout_expire, s);
 
     asclin_uart_update_parameters(s);
 }
@@ -884,6 +932,8 @@ static const VMStateDescription vmstate_asclin_uart = {
         VMSTATE_UINT8(lin_gateway_rx_type, TriCoreASCLINState),
         VMSTATE_UINT8(lin_data_count, TriCoreASCLINState),
         VMSTATE_UINT16(lin_checksum_sum, TriCoreASCLINState),
+        VMSTATE_TIMER_PTR(lin_timeout_timer, TriCoreASCLINState),
+        VMSTATE_BOOL(lin_timeout_response, TriCoreASCLINState),
         VMSTATE_UINT8(lin_response_length, TriCoreASCLINState),
         VMSTATE_BOOL(lin_checksum_enhanced, TriCoreASCLINState),
         VMSTATE_BOOL(lin_sync_seen, TriCoreASCLINState),
