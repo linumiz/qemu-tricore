@@ -27,6 +27,7 @@ typedef struct TriCoreERAYState {
     uint32_t cycle;
     uint32_t slot_status;
     uint32_t mbid, mbctrl;
+    uint32_t static_slots, dynamic_start, minislot, guardian, channel_mask;
     QEMUTimer *scheduler;
     QTAILQ_ENTRY(TriCoreERAYState) bus_node;
     uint8_t msg_data[16 * 1024];

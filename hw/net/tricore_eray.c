@@ -28,6 +28,11 @@
 #define ERAY_MBCTRL    0x128
 #define ERAY_MBPENDING 0x12c
 #define ERAY_SCHED_CFG 0x130
+#define ERAY_STATIC_SLOTS 0x134
+#define ERAY_DYNAMIC_START 0x138
+#define ERAY_MINISLOT 0x13c
+#define ERAY_GUARDIAN 0x140
+#define ERAY_CHANNEL 0x144
 
 #define CCSV_POC_SHIFT 0
 #define CCSV_POC_MASK  0x3f
@@ -102,6 +107,16 @@ static void eray_commit_message(TriCoreERAYState *s)
      * same deterministic virtual timebase. */
     s->slot_status = (frame_id & 0x7ff) | ((s->cycle & 0x3f) << 16) |
                      ((s->mbctrl & MBCTRL_CHANNEL_B) ? BIT(31) : 0);
+    if (s->guardian || !(s->channel_mask & ((s->mbctrl & MBCTRL_CHANNEL_B) ? 2 : 1))) {
+        s->ccev |= BIT(3); /* bus guardian/channel violation */
+        eray_update_irq(s);
+        return;
+    }
+    /* Static slots are sent in the configured prefix; remaining frame IDs
+     * use the dynamic segment and are represented by the minislot marker. */
+    if (frame_id > s->static_slots) {
+        s->slot_status |= BIT(30) | ((s->minislot & 0xff) << 8);
+    }
     QTAILQ_FOREACH(peer, &eray_bus, bus_node) {
         if (peer == s || peer->ccsv != POC_NORMAL_ACTIVE) continue;
         uint32_t peer_off = (s->mbid & 0xff) * 64;
@@ -132,6 +147,11 @@ static uint64_t eray_read(void *opaque, hwaddr off, unsigned size)
     case ERAY_MBCTRL: return s->mbctrl;
     case ERAY_MBPENDING: return s->mbsc1 | s->ndat1;
     case ERAY_SCHED_CFG: return ERAY_CYCLE_NS;
+    case ERAY_STATIC_SLOTS: return s->static_slots;
+    case ERAY_DYNAMIC_START: return s->dynamic_start;
+    case ERAY_MINISLOT: return s->minislot;
+    case ERAY_GUARDIAN: return s->guardian;
+    case ERAY_CHANNEL: return s->channel_mask;
     default: return 0;
     }
 }
@@ -151,6 +171,11 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
     case ERAY_SLOTSTAT: s->slot_status = value; break;
     case ERAY_MBID: s->mbid = value & 0xff; break;
     case ERAY_MBCTRL: s->mbctrl = value; if (value & MBCTRL_COMMIT) eray_commit_message(s); break;
+    case ERAY_STATIC_SLOTS: s->static_slots = value & 0x7ff; break;
+    case ERAY_DYNAMIC_START: s->dynamic_start = value & 0x7ff; break;
+    case ERAY_MINISLOT: s->minislot = value & 0xff; break;
+    case ERAY_GUARDIAN: s->guardian = value & 1; break;
+    case ERAY_CHANNEL: s->channel_mask = value & 3; break;
     default: break;
     }
     eray_update_irq(s);
@@ -169,6 +194,8 @@ static void eray_reset(DeviceState *dev)
     s->ccev = s->succ1 = s->nemc = s->mbsc1 = s->ndat1 = 0;
     s->command = s->cycle = s->slot_status = 0;
     s->mbid = s->mbctrl = 0;
+    s->static_slots = 64; s->dynamic_start = 65; s->minislot = 1;
+    s->guardian = 0; s->channel_mask = 3;
     timer_del(s->scheduler);
     memset(s->msg_data, 0, sizeof(s->msg_data));
     eray_update_irq(s);
@@ -203,6 +230,9 @@ static const VMStateDescription vmstate_eray = {
         VMSTATE_UINT32(command, TriCoreERAYState), VMSTATE_UINT32(cycle, TriCoreERAYState),
         VMSTATE_UINT32(slot_status, TriCoreERAYState), VMSTATE_UINT32(mbid, TriCoreERAYState),
         VMSTATE_UINT32(mbctrl, TriCoreERAYState), VMSTATE_TIMER_PTR(scheduler, TriCoreERAYState),
+        VMSTATE_UINT32(static_slots, TriCoreERAYState), VMSTATE_UINT32(dynamic_start, TriCoreERAYState),
+        VMSTATE_UINT32(minislot, TriCoreERAYState), VMSTATE_UINT32(guardian, TriCoreERAYState),
+        VMSTATE_UINT32(channel_mask, TriCoreERAYState),
         VMSTATE_END_OF_LIST()
     }
 };
