@@ -213,9 +213,10 @@ static void eray_init(Object *obj)
 static void eray_realize(DeviceState *dev, Error **errp)
 {
     TriCoreERAYState *s = TRICORE_ERAY(dev);
+    g_autofree char *ram_name = g_strdup_printf("tricore-eray-msg-ram-%p", s);
     memory_region_init_io(&s->iomem, OBJECT(dev), &eray_ops, s,
                           "tricore-eray", 0x1000);
-    memory_region_init_ram(&s->msg_ram, OBJECT(dev), "tricore-eray-msg-ram",
+    memory_region_init_ram(&s->msg_ram, OBJECT(dev), ram_name,
                            sizeof(s->msg_data), &error_fatal);
     s->scheduler = timer_new_ns(QEMU_CLOCK_VIRTUAL, eray_scheduler_cb, s);
     QTAILQ_INSERT_TAIL(&eray_bus, s, bus_node);
