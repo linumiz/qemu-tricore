@@ -18,6 +18,7 @@
 #define DMA_STAT_DESC_ERROR BIT(2)
 #define DMA_STAT_EOL BIT(3)
 #define DMA_CTL_CHAIN BIT(2)
+#define DMA_CTL_REQ_ENABLE BIT(3)
 
 static uint64_t dma_read(void *opaque, hwaddr off, unsigned size)
 {
@@ -25,6 +26,7 @@ static uint64_t dma_read(void *opaque, hwaddr off, unsigned size)
     switch (off) { case DMA_SRC: return s->src; case DMA_DST: return s->dst;
     case DMA_LEN: return s->length; case DMA_CTL: return s->control;
     case DMA_STAT: return s->status; case 0x14: return s->descriptor;
+    case 0x18: return s->request;
     default: return 0; }
 }
 
@@ -38,8 +40,10 @@ static void dma_write(void *opaque, hwaddr off, uint64_t value, unsigned size)
     case DMA_STAT: s->status &= ~(value & (DMA_STAT_DONE | DMA_STAT_ERROR |
                                              DMA_STAT_DESC_ERROR | DMA_STAT_EOL)); break;
     case 0x14: s->descriptor = value; break;
+    case 0x18: s->request = value & 0xff; break;
     case DMA_CTL:
-        s->control = value & (DMA_CTL_START | DMA_CTL_IRQ | DMA_CTL_CHAIN);
+        s->control = value & (DMA_CTL_START | DMA_CTL_IRQ | DMA_CTL_CHAIN |
+                               DMA_CTL_REQ_ENABLE);
         if (value & DMA_CTL_START) {
             MemTxResult r = MEMTX_OK;
             unsigned count = 0;
@@ -78,6 +82,14 @@ static void dma_write(void *opaque, hwaddr off, uint64_t value, unsigned size)
         }
         break;
     default: break;
+    }
+}
+
+void tricore_dma_request(TriCoreDMAState *s, uint32_t request)
+{
+    /* SoC-specific peripheral lines converge on this stable request API. */
+    if ((s->control & DMA_CTL_REQ_ENABLE) && s->request == request) {
+        dma_write(s, DMA_CTL, s->control | DMA_CTL_START, 4);
     }
 }
 
