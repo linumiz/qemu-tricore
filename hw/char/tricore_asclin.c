@@ -26,6 +26,9 @@
 
 static GPtrArray *asclin_lin_bus;
 
+#define ASCLIN_LIN_GATEWAY_BYTE 0xf1
+#define ASCLIN_LIN_GATEWAY_END  0xf2
+
 /*
  * TC3x register offsets are 0x00..0x50, one per 4-byte slot.
  * Enum indices below are offset/4 for TC3x. TC4x offsets start at 0x100
@@ -142,6 +145,26 @@ static bool asclin_lin_pid_valid(uint8_t pid)
     return ((pid >> 6) & 1) == p0 && ((pid >> 7) & 1) == (p1 ^ 1);
 }
 
+static void asclin_lin_gateway_emit(TriCoreASCLINState *s, uint8_t byte)
+{
+    uint8_t record[2] = { ASCLIN_LIN_GATEWAY_BYTE, byte };
+
+    if (s->lin_gateway) {
+        qemu_chr_fe_write_all(&s->chr, record, sizeof(record));
+    } else {
+        qemu_chr_fe_write_all(&s->chr, &byte, 1);
+    }
+}
+
+static void asclin_lin_gateway_end(TriCoreASCLINState *s)
+{
+    uint8_t marker = ASCLIN_LIN_GATEWAY_END;
+
+    if (s->lin_gateway && asclin_lin_mode(s)) {
+        qemu_chr_fe_write_all(&s->chr, &marker, 1);
+    }
+}
+
 static void asclin_lin_bus_receive(TriCoreASCLINState *s, uint8_t byte)
 {
     if (byte == 0x55) {
@@ -177,7 +200,12 @@ static gboolean uart_transmit_watch(void *do_not_use, GIOCondition cond,
 
     s->watch_tag = 0;
 
-    ret = qemu_chr_fe_write_all(&s->chr, (uint8_t *)&s->txbuf, 1);
+    if (s->lin_gateway && asclin_lin_mode(s)) {
+        asclin_lin_gateway_emit(s, s->txbuf);
+        ret = 1;
+    } else {
+        ret = qemu_chr_fe_write_all(&s->chr, (uint8_t *)&s->txbuf, 1);
+    }
     if (ret <= 0) {
         s->watch_tag = qemu_chr_fe_add_watch(&s->chr, G_IO_OUT | G_IO_HUP,
                                              uart_transmit_watch, s);
@@ -192,6 +220,7 @@ drained:
     if (asclin_lin_mode(s)) {
         qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TH | MASK_FLAGS_TR);
     }
+    asclin_lin_gateway_end(s);
     asclin_pulse_irq(s, MASK_FLAGS_TFL | MASK_FLAGS_TC);
     return G_SOURCE_REMOVE;
 }
@@ -252,6 +281,7 @@ drained:
     if (asclin_lin_mode(s)) {
         qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TH | MASK_FLAGS_TR);
     }
+    asclin_lin_gateway_end(s);
     asclin_pulse_irq(s, MASK_FLAGS_TFL | MASK_FLAGS_TC);
 }
 
@@ -625,6 +655,18 @@ static void uart_rx(void *opaque, const uint8_t *buf, int size)
     TriCoreASCLINState *s = opaque;
 
     while (size > 0) {
+        if (s->lin_gateway && asclin_lin_mode(s)) {
+            if (s->lin_gateway_rx_type == ASCLIN_LIN_GATEWAY_BYTE) {
+                asclin_lin_bus_receive(s, *buf++);
+                s->lin_gateway_rx_type = 0;
+                size--;
+                continue;
+            }
+            s->lin_gateway_rx_type = (*buf++ == ASCLIN_LIN_GATEWAY_BYTE) ?
+                                      ASCLIN_LIN_GATEWAY_BYTE : 0;
+            size--;
+            continue;
+        }
         if (asclin_buffer_free(s) == 0) {
             error_report(
                 "asclin_uart: RX buffer overflowed, %d bytes dropped", size);
@@ -673,6 +715,7 @@ static void asclin_uart_reset(DeviceState *d)
     asclin_buffer_reset(s);
     s->lin_sync_seen = false;
     s->lin_pid_seen = false;
+    s->lin_gateway_rx_type = 0;
 }
 
 static void asclin_uart_update_parameters(TriCoreASCLINState *s)
@@ -771,6 +814,8 @@ static const VMStateDescription vmstate_asclin_uart = {
         VMSTATE_UINT32(rxbufwriteidx, TriCoreASCLINState),
         VMSTATE_UINT32(rxbufreadidx, TriCoreASCLINState),
         VMSTATE_BOOL(block_tx_enabled, TriCoreASCLINState),
+        VMSTATE_BOOL(lin_gateway, TriCoreASCLINState),
+        VMSTATE_UINT8(lin_gateway_rx_type, TriCoreASCLINState),
         VMSTATE_BOOL(lin_sync_seen, TriCoreASCLINState),
         VMSTATE_BOOL(lin_pid_seen, TriCoreASCLINState),
         VMSTATE_END_OF_LIST()
@@ -782,6 +827,7 @@ static const Property asclin_uart_properties[] = {
     DEFINE_PROP_CHR("chardev", TriCoreASCLINState, chr),
     DEFINE_PROP_BOOL("block-tx-enabled", TriCoreASCLINState,
                      block_tx_enabled, true),
+    DEFINE_PROP_BOOL("lin-gateway", TriCoreASCLINState, lin_gateway, false),
 };
 
 static void asclin_uart_class_init(ObjectClass *klass, const void *data)

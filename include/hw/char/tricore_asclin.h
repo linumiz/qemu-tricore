@@ -106,6 +106,8 @@ struct TriCoreASCLINState {
     uint32_t rxbufwriteidx;
     uint32_t rxbufreadidx;
     bool block_tx_enabled;
+    bool lin_gateway;
+    uint8_t lin_gateway_rx_type;
     bool lin_sync_seen;
     bool lin_pid_seen;
     ptimer_state *ptimer;
