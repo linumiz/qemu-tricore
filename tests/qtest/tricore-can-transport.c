@@ -319,6 +319,18 @@ static void test_eray_profiles(void)
                      !=, 0);
     qtest_writel(global_qtest, 0xF441D120, (1u << 29));
     qtest_writel(global_qtest, 0xF441D164, 0);
+    /* The second node's cycle filter rejects the same frame deterministically. */
+    qtest_writel(global_qtest, 0xF441D168, 63);
+    qtest_writel(global_qtest, 0xF441C124, 0);
+    qtest_writel(global_qtest, 0xF441E000, 101);
+    qtest_writel(global_qtest, 0xF441C128, 2);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    qtest_clock_step(global_qtest, 1000);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D0F4), ==, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D120) & (1u << 29),
+                     !=, 0);
+    qtest_writel(global_qtest, 0xF441D120, (1u << 29));
+    qtest_writel(global_qtest, 0xF441D168, 0);
     /* A one-entry FIFO reports an overrun on the second accepted frame. */
     qtest_writel(global_qtest, 0xF441D15C, 2);
     qtest_writel(global_qtest, 0xF441D160, 1);
