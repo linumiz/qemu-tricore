@@ -181,6 +181,28 @@ ssize_t can_bus_client_send(CanBusClientState *client,
     return can_bus_dispatch(bus, client, frames, frames_cnt);
 }
 
+ssize_t can_bus_client_send_xl(CanBusClientState *client,
+                               const qemu_can_xl_frame *frames,
+                               size_t frames_cnt)
+{
+    CanBusState *bus = client->bus;
+    ssize_t delivered = 0;
+    if (!bus || !frames || !frames_cnt || frames_cnt > 1 ||
+        frames[0].payload_len > sizeof(frames[0].data)) {
+        return -1;
+    }
+    /* XL delivery is opt-in so legacy CAN/FD clients never see an unknown
+     * frame layout.  This keeps existing QEMU devices source-compatible. */
+    CanBusClientState *peer;
+    QTAILQ_FOREACH(peer, &bus->clients, next) {
+        if (peer != client && peer->info->receive_xl &&
+            peer->info->receive_xl(peer, frames, frames_cnt) > 0) {
+            delivered++;
+        }
+    }
+    return delivered;
+}
+
 ssize_t can_bus_client_send_timed(CanBusClientState *client,
                                   const qemu_can_frame *frames,
                                   size_t frames_cnt, uint64_t delay_ns)

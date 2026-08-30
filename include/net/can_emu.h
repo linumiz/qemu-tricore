@@ -62,6 +62,18 @@ typedef struct qemu_can_frame {
 #define QEMU_CAN_FRMF_BRS     0x01 /* bit rate switch (2nd bitrate for data) */
 #define QEMU_CAN_FRMF_ESI     0x02 /* error state ind. of transmitting node */
 #define QEMU_CAN_FRMF_TYPE_FD 0x10 /* internal bit ind. of CAN FD frame */
+#define QEMU_CAN_FRMF_TYPE_XL 0x20 /* internal bit ind. of CAN XL frame */
+
+/* CAN XL carries protocol metadata and up to 2048 payload bytes. */
+typedef struct qemu_can_xl_frame {
+    qemu_canid_t can_id;
+    uint8_t flags;
+    uint8_t sdt;
+    uint16_t vcid;
+    uint16_t acceptance_field;
+    uint16_t payload_len;
+    uint8_t data[2048] QEMU_ALIGNED(8);
+} qemu_can_xl_frame;
 
 /**
  * struct qemu_can_filter - CAN ID based filter in can_register().
@@ -104,6 +116,8 @@ typedef struct CanBusClientInfo {
     bool (*can_receive)(CanBusClientState *);
     ssize_t (*receive)(CanBusClientState *,
         const struct qemu_can_frame *frames, size_t frames_cnt);
+    ssize_t (*receive_xl)(CanBusClientState *,
+        const qemu_can_xl_frame *frames, size_t frames_cnt);
 } CanBusClientInfo;
 
 struct CanBusClientState {
@@ -128,6 +142,10 @@ int can_bus_remove_client(CanBusClientState *client);
 ssize_t can_bus_client_send(CanBusClientState *,
                             const struct qemu_can_frame *frames,
                             size_t frames_cnt);
+
+/* Deliver CAN XL frames only to clients that advertise an XL callback. */
+ssize_t can_bus_client_send_xl(CanBusClientState *,
+                               const qemu_can_xl_frame *, size_t frames_cnt);
 
 /* Schedule delivery after a virtual-time delay (nanoseconds). */
 ssize_t can_bus_client_send_timed(CanBusClientState *,

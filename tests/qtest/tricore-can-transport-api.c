@@ -7,6 +7,14 @@ static void lost(CanBusClientState *client)
     lost_count++;
 }
 
+static void test_xl_delivery(void)
+{
+    qemu_can_xl_frame frame = { .can_id = 0x321, .payload_len = 2048,
+                                .flags = QEMU_CAN_FRMF_TYPE_XL };
+    CanBusClientState client = { 0 };
+    g_assert_cmpint(can_bus_client_send_xl(&client, &frame, 1), ==, -1);
+}
+
 static void test_wired_and(void)
 {
     const bool drives[] = { true, true, false };
@@ -48,5 +56,6 @@ int main(int argc, char **argv)
     g_test_add_func("/tricore/can/arbitration", test_arbitration);
     g_test_add_func("/tricore/can/timed-send", test_timed_send);
     g_test_add_func("/tricore/can/arbitration-callback", test_arbitration_callback);
+    g_test_add_func("/tricore/can/xl-delivery", test_xl_delivery);
     return g_test_run();
 }
