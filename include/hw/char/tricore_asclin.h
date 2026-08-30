@@ -113,6 +113,8 @@ struct TriCoreASCLINState {
     bool lin_pid_seen;
     uint8_t lin_data_count;
     uint16_t lin_checksum_sum;
+    uint8_t lin_response_length;
+    bool lin_checksum_enhanced;
     ptimer_state *ptimer;
     QEMUBH *bh;
 };

@@ -184,7 +184,8 @@ static void asclin_lin_bus_receive(TriCoreASCLINState *s, uint8_t byte)
     } else if (s->lin_sync_seen && !s->lin_pid_seen) {
         s->lin_pid_seen = true;
         s->lin_data_count = 0;
-        s->lin_checksum_sum = (s->regs[LINCON] & (1u << 25)) ? byte : 0;
+        s->lin_checksum_sum = (s->regs[LINCON] & (1u << 25) &&
+                               s->lin_checksum_enhanced) ? byte : 0;
         if (!asclin_lin_pid_valid(byte)) {
             qatomic_or(&s->regs[FLAGS], MASK_FLAGS_CE);
             asclin_pulse_irq(s, MASK_FLAGS_CE);
@@ -192,7 +193,7 @@ static void asclin_lin_bus_receive(TriCoreASCLINState *s, uint8_t byte)
     }
 
     if ((s->regs[LINCON] & (1u << 25)) && s->lin_pid_seen &&
-        s->lin_data_count >= 8) {
+        s->lin_data_count >= s->lin_response_length) {
         if (byte != (uint8_t)~s->lin_checksum_sum) {
             qatomic_or(&s->regs[FLAGS], MASK_FLAGS_LC);
             asclin_pulse_irq(s, MASK_FLAGS_LC);
@@ -211,7 +212,7 @@ static void asclin_lin_bus_receive(TriCoreASCLINState *s, uint8_t byte)
     }
     s->rxbuf[s->rxbufwriteidx] = byte;
     s->rxbufwriteidx = (s->rxbufwriteidx + 1) % ASCLIN_RX_BUFFER;
-    if (s->lin_pid_seen && s->lin_data_count < 8) {
+    if (s->lin_pid_seen && s->lin_data_count < s->lin_response_length) {
         s->lin_checksum_sum += byte;
         s->lin_data_count++;
     }
@@ -806,6 +807,11 @@ static void asclin_uart_realize(DeviceState *dev, Error **errp)
 {
     TriCoreASCLINState *s = TRICORE_ASCLIN(dev);
 
+    if (s->lin_response_length == 0 || s->lin_response_length > 8) {
+        error_setg(errp, "lin-response-length must be between 1 and 8");
+        return;
+    }
+
     if (!asclin_lin_bus) {
         asclin_lin_bus = g_ptr_array_new();
     }
@@ -870,6 +876,8 @@ static const VMStateDescription vmstate_asclin_uart = {
         VMSTATE_UINT8(lin_gateway_rx_type, TriCoreASCLINState),
         VMSTATE_UINT8(lin_data_count, TriCoreASCLINState),
         VMSTATE_UINT16(lin_checksum_sum, TriCoreASCLINState),
+        VMSTATE_UINT8(lin_response_length, TriCoreASCLINState),
+        VMSTATE_BOOL(lin_checksum_enhanced, TriCoreASCLINState),
         VMSTATE_BOOL(lin_sync_seen, TriCoreASCLINState),
         VMSTATE_BOOL(lin_pid_seen, TriCoreASCLINState),
         VMSTATE_END_OF_LIST()
@@ -882,6 +890,10 @@ static const Property asclin_uart_properties[] = {
     DEFINE_PROP_BOOL("block-tx-enabled", TriCoreASCLINState,
                      block_tx_enabled, true),
     DEFINE_PROP_BOOL("lin-gateway", TriCoreASCLINState, lin_gateway, false),
+    DEFINE_PROP_UINT8("lin-response-length", TriCoreASCLINState,
+                      lin_response_length, 8),
+    DEFINE_PROP_BOOL("lin-checksum-enhanced", TriCoreASCLINState,
+                     lin_checksum_enhanced, true),
 };
 
 static void asclin_uart_class_init(ObjectClass *klass, const void *data)
