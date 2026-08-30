@@ -72,6 +72,32 @@ static void test_eray_profiles(void)
     qtest_writel(global_qtest, 0xF441C118, 3);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C100), ==, 0x0d);
     qtest_writel(global_qtest, 0xF441D118, 3);
+    /* TC4x uses the public SRC rows 720..723. Enable all four rows before
+     * driving ERAY0/1 events so SRR, masking and explicit W1C/CLRR paths are
+     * observable at the interrupt router. */
+    for (unsigned src = 720; src < 724; src++) {
+        qtest_writel(global_qtest, 0xF4432000 + src * 4,
+                     1 | (1u << 23));
+    }
+    qtest_writel(global_qtest, 0xF441C118, 0xff);
+    qtest_writel(global_qtest, 0xF441D118, 0xff);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF4432000 + 720 * 4) &
+                     (1u << 24), !=, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF4432000 + 722 * 4) &
+                     (1u << 24), !=, 0);
+    /* Disable ERAY0 INT0 and clear its pending request through SRC CLRR. */
+    qtest_writel(global_qtest, 0xF4432000 + 720 * 4, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF4432000 + 720 * 4) &
+                     (1u << 23), ==, 0);
+    qtest_writel(global_qtest, 0xF4432000 + 720 * 4, (1u << 25));
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF4432000 + 720 * 4) &
+                     (1u << 24), ==, 0);
+    /* CCEV is W1C on both TC4x ERAY instances; clear the illegal-command
+     * events before exercising the message (INT1) sources. */
+    qtest_writel(global_qtest, 0xF441C104, 1);
+    qtest_writel(global_qtest, 0xF441D104, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C104) & 1, ==, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D104) & 1, ==, 0);
     /* Header validation rejects a payload that cannot fit the public 64-byte
      * message-RAM fixture and reports the documented header error event. */
     qtest_writel(global_qtest, 0xF441E000, 0x10);
@@ -96,6 +122,10 @@ static void test_eray_profiles(void)
     qtest_writel(global_qtest, 0xF441C128, 2); /* unlock */
     qtest_writel(global_qtest, 0xF441C128, 1); /* commit */
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D12C), ==, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF4432000 + 721 * 4) &
+                     (1u << 24), !=, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF4432000 + 723 * 4) &
+                     (1u << 24), !=, 0);
     /* Exercise the public FIFO configuration fields for a dynamic frame. */
     qtest_writel(global_qtest, 0xF441D138, 0);   /* dynamic start */
     qtest_writel(global_qtest, 0xF441D15C, 2);   /* FIFO first buffer */
