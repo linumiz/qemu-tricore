@@ -28,6 +28,8 @@ REG32(FIFO_STATUS, 0x28)
 REG32(FIFO_CLEAR, 0x2c)
 REG32(GATEWAY_TARGET, 0x30)
 REG32(GATEWAY_ENABLE, 0x34)
+REG32(TX_LEN, 0x38)
+REG32(RX_LEN, 0x3c)
 
 /* TC27D MultiCAN+ register locations (iLLD TC27D_UM_V2.2): Node 0 and
  * message object 0.  The compact registers above remain as a QEMU-friendly
@@ -71,6 +73,9 @@ static void tricore_mcan_load_rx(TriCoreMCANState *s)
     s->regs[R_RXID / 4] = s->rx_frame.can_id;
     s->regs[R_RXDATAL / 4] = ldl_le_p(&s->rx_frame.data[0]);
     s->regs[R_RXDATAH / 4] = ldl_le_p(&s->rx_frame.data[4]);
+    memcpy(s->rx_data, s->rx_frame.data, sizeof(s->rx_data));
+    s->rx_len = can_dlc2len(s->rx_frame.can_dlc);
+    s->regs[R_RX_LEN / 4] = s->rx_len;
     s->regs[R_STATUS / 4] |= R_STATUS_RX_PENDING_MASK;
 }
 
@@ -139,6 +144,18 @@ static void tricore_mcan_send(TriCoreMCANState *s)
     qemu_can_frame frame = { 0 };
     frame.can_id = s->regs[R_TXID / 4];
     frame.can_dlc = 8;
+    if (s->regs[R_TXCTRL / 4] & BIT(1)) {
+        /* QEMU's CAN transport carries FD/BRS metadata and up to 64 bytes. */
+        s->tx_len = MIN(s->regs[R_TX_LEN / 4], 64u);
+        frame.can_dlc = can_len2dlc(s->tx_len);
+        frame.flags = QEMU_CAN_FRMF_TYPE_FD;
+        if (s->regs[R_TXCTRL / 4] & BIT(2)) {
+            frame.flags |= QEMU_CAN_FRMF_BRS;
+        }
+    } else {
+        s->tx_len = 8;
+    }
+    memcpy(frame.data, s->tx_data, sizeof(frame.data));
     stl_le_p(&frame.data[0], s->regs[R_TXDATAL / 4]);
     stl_le_p(&frame.data[4], s->regs[R_TXDATAH / 4]);
     if (s->regs[R_CONTROL / 4] & R_CONTROL_LOOPBACK_MASK) {
@@ -159,6 +176,9 @@ static uint64_t tricore_mcan_read(void *opaque, hwaddr addr, unsigned size)
     }
     if (addr == R_RXDATAL) {
         return s->regs[index];
+    }
+    if (addr >= 0x80 && addr < 0xc0 && (addr & 3) == 0) {
+        return ldl_le_p(&s->rx_data[addr - 0x80]);
     }
     if (addr == R_FIFO_STATUS) {
         return s->rx_fifo_count | (s->rx_pending ? BIT(8) : 0);
@@ -186,8 +206,11 @@ static void tricore_mcan_write(void *opaque, hwaddr addr, uint64_t value,
         s->rx_fifo_head = s->rx_fifo_tail = s->rx_fifo_count = 0;
         s->rx_pending = false;
         s->regs[R_STATUS / 4] &= ~R_STATUS_RX_PENDING_MASK;
+    } else if (addr >= 0x40 && addr < 0x80 && (addr & 3) == 0) {
+        stl_le_p(&s->tx_data[addr - 0x40], value);
     } else if (addr == R_INT_ENABLE || addr == R_CONTROL ||
                addr == R_TXID || addr == R_TXDATAL || addr == R_TXDATAH ||
+               addr == R_TX_LEN ||
                addr == R_GATEWAY_TARGET || addr == R_GATEWAY_ENABLE ||
                (addr >= R_MO0_AR && addr < R_MO0_AR + MCAN_OBJECTS * MO_STRIDE &&
                 ((addr - R_MO0_AR) % MO_STRIDE) == 0) ||
@@ -282,6 +305,10 @@ static const VMStateDescription vmstate_tricore_mcan = {
         VMSTATE_UINT8(rx_fifo_head, TriCoreMCANState),
         VMSTATE_UINT8(rx_fifo_tail, TriCoreMCANState),
         VMSTATE_UINT8(rx_fifo_count, TriCoreMCANState),
+        VMSTATE_UINT8_ARRAY(tx_data, TriCoreMCANState, 64),
+        VMSTATE_UINT8_ARRAY(rx_data, TriCoreMCANState, 64),
+        VMSTATE_UINT8(tx_len, TriCoreMCANState),
+        VMSTATE_UINT8(rx_len, TriCoreMCANState),
         VMSTATE_END_OF_LIST()
     },
 };
