@@ -267,6 +267,10 @@ static void tc4dx_soc_init(Object *obj)
     }
     object_initialize_child(obj, "eth", &s->eth, TYPE_TRICORE_GETH);
     object_initialize_child(obj, "leth", &s->leth, TYPE_TRICORE_LETH);
+    /* These embedded children are realized below; initialize them here so
+     * DEVICE() receives a valid QOM object during TC4x board startup. */
+    object_initialize_child(obj, "dma", &s->dma, TYPE_TRICORE_DMA);
+    object_initialize_child(obj, "port", &s->port, TYPE_TRICORE_PORT);
     object_initialize_child(obj, "ici", &s->ici, TYPE_TRICORE_ICI);
     for (unsigned i = 0; i < 2; i++) {
         char *name = g_strdup_printf("eray%u", i);
