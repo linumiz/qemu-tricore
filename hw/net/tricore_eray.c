@@ -543,7 +543,7 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
     case ERAY_CHANNEL: s->channel_mask = value & 3; break;
     case ERAY_SCHED_CFG:
         s->sched_cfg = value & 1;
-        s->sched_period_ns = ((value >> 8) & 0xffff) * 1000;
+        s->sched_period_ns = ((uint64_t)((value >> 8) & 0xffff)) * 1000;
         if (!s->sched_period_ns) {
             s->sched_period_ns = ERAY_CYCLE_NS;
         }
@@ -566,12 +566,12 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
     case ERAY_IRQ1_MASK: s->irq1_mask = value; break;
     case ERAY_GTU_MICROTICKS:
         s->gtu_microticks = value & ERAY_GTU_MASK;
-        s->sched_period_ns = MAX(1u, s->gtu_microticks) *
+        s->sched_period_ns = (uint64_t)MAX(1u, s->gtu_microticks) *
                              MAX(1u, s->gtu_macroticks) * 1000;
         break;
     case ERAY_GTU_MACROTICKS:
         s->gtu_macroticks = value & ERAY_GTU_MASK;
-        s->sched_period_ns = MAX(1u, s->gtu_microticks) *
+        s->sched_period_ns = (uint64_t)MAX(1u, s->gtu_microticks) *
                              MAX(1u, s->gtu_macroticks) * 1000;
         break;
     case ERAY_GTU_CYCLE:
@@ -716,7 +716,7 @@ static const VMStateDescription vmstate_eray = {
         VMSTATE_UINT32(last_rx_cycle, TriCoreERAYState),
         VMSTATE_UINT8(last_rx_channel, TriCoreERAYState),
         VMSTATE_UINT32(sched_cfg, TriCoreERAYState),
-        VMSTATE_UINT32(sched_period_ns, TriCoreERAYState),
+        VMSTATE_UINT64(sched_period_ns, TriCoreERAYState),
         VMSTATE_UINT32(slot_counter, TriCoreERAYState),
         VMSTATE_UINT32(minislot_counter, TriCoreERAYState),
         VMSTATE_UINT32(tx_frame_id, TriCoreERAYState),
