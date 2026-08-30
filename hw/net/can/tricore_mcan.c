@@ -25,6 +25,8 @@ REG32(RXDATAH, 0x20)
 REG32(INT_ENABLE, 0x24)
 REG32(FIFO_STATUS, 0x28)
 REG32(FIFO_CLEAR, 0x2c)
+REG32(GATEWAY_TARGET, 0x30)
+REG32(GATEWAY_ENABLE, 0x34)
 
 /* TC27D MultiCAN+ register locations (iLLD TC27D_UM_V2.2): Node 0 and
  * message object 0.  The compact registers above remain as a QEMU-friendly
@@ -112,6 +114,13 @@ static ssize_t tricore_mcan_receive(CanBusClientState *client,
     s->regs[MO_REG(object, R_MO0_AR) / 4] = s->rx_frame.can_id;
     s->regs[MO_REG(object, R_MO0_DATAL) / 4] = s->regs[R_RXDATAL / 4];
     s->regs[MO_REG(object, R_MO0_DATAH) / 4] = s->regs[R_RXDATAH / 4];
+    if ((s->regs[R_GATEWAY_ENABLE / 4] & 1) &&
+        s->regs[R_GATEWAY_TARGET / 4] < MCAN_OBJECTS) {
+        unsigned target = s->regs[R_GATEWAY_TARGET / 4];
+        s->regs[MO_REG(target, R_MO0_AR) / 4] = s->rx_frame.can_id;
+        s->regs[MO_REG(target, R_MO0_DATAL) / 4] = s->regs[R_RXDATAL / 4];
+        s->regs[MO_REG(target, R_MO0_DATAH) / 4] = s->regs[R_RXDATAH / 4];
+    }
     s->regs[R_STATUS / 4] |= R_STATUS_RX_PENDING_MASK;
     tricore_mcan_update_irq(s);
     return 1;
@@ -176,6 +185,7 @@ static void tricore_mcan_write(void *opaque, hwaddr addr, uint64_t value,
         s->regs[R_STATUS / 4] &= ~R_STATUS_RX_PENDING_MASK;
     } else if (addr == R_INT_ENABLE || addr == R_CONTROL ||
                addr == R_TXID || addr == R_TXDATAL || addr == R_TXDATAH ||
+               addr == R_GATEWAY_TARGET || addr == R_GATEWAY_ENABLE ||
                (addr >= R_MO0_AR && addr < R_MO0_AR + MCAN_OBJECTS * MO_STRIDE &&
                 ((addr - R_MO0_AR) % MO_STRIDE) == 0) ||
                (addr >= R_MO0_AMR && addr < R_MO0_AMR + MCAN_OBJECTS * MO_STRIDE &&
