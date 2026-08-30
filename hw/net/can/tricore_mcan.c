@@ -34,6 +34,7 @@ REG32(MO0_DATAL, 0x910)
 REG32(MO0_DATAH, 0x914)
 REG32(MO0_AR, 0x918)
 REG32(MO0_CTR, 0x91c)
+REG32(MO0_AMR, 0x90c)
 
 static void tricore_mcan_update_irq(TriCoreMCANState *s)
 {
@@ -55,6 +56,11 @@ static ssize_t tricore_mcan_receive(CanBusClientState *client,
     TriCoreMCANState *s = container_of(client, TriCoreMCANState, bus_client);
 
     if (!frames_cnt || s->rx_pending) {
+        return 0;
+    }
+    /* MultiCAN+ acceptance-mask semantics: a set mask bit is don't-care. */
+    if (((frames[0].can_id ^ s->regs[R_MO0_AR / 4]) &
+         ~s->regs[R_MO0_AMR / 4]) != 0) {
         return 0;
     }
     s->rx_frame = frames[0];
@@ -123,7 +129,8 @@ static void tricore_mcan_write(void *opaque, hwaddr addr, uint64_t value,
         s->regs[index] &= ~(uint32_t)value;
     } else if (addr == R_INT_ENABLE || addr == R_CONTROL ||
                addr == R_TXID || addr == R_TXDATAL || addr == R_TXDATAH ||
-               addr == R_MO0_AR || addr == R_MO0_DATAL || addr == R_MO0_DATAH) {
+               addr == R_MO0_AR || addr == R_MO0_AMR ||
+               addr == R_MO0_DATAL || addr == R_MO0_DATAH) {
         s->regs[index] = value;
     } else if (addr == R_TXCTRL && (value & 1)) {
         tricore_mcan_send(s);
@@ -178,6 +185,8 @@ static void tricore_mcan_init(Object *obj)
     sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq);
     memory_region_init_io(&s->iomem, obj, &tricore_mcan_ops, s,
                           TYPE_TRICORE_MCAN, 0x2000);
+    /* Reset value accepts every identifier until firmware programs a mask. */
+    s->regs[R_MO0_AMR / 4] = UINT32_MAX;
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
 }
 
