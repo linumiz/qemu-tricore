@@ -36,6 +36,7 @@ REG32(RX_LEN, 0x3c)
  * smoke interface; these aliases let early iLLD code use documented offsets. */
 REG32(NODE0_CR, 0x200)
 REG32(NODE0_BTR, 0x210)
+REG32(NODE0_BTR_FD, 0x214)
 REG32(NODE1_CR, 0x220)
 REG32(NODE2_CR, 0x240)
 REG32(NODE3_CR, 0x260)
@@ -82,7 +83,12 @@ static void tricore_mcan_load_rx(TriCoreMCANState *s)
     s->regs[R_RXDATAH / 4] = ldl_le_p(&s->rx_frame.data[4]);
     memcpy(s->rx_data, s->rx_frame.data, sizeof(s->rx_data));
     s->rx_len = can_dlc2len(s->rx_frame.can_dlc);
-    s->regs[R_RX_LEN / 4] = s->rx_len;
+    s->rx_fd = !!(s->rx_frame.flags & QEMU_CAN_FRMF_TYPE_FD);
+    s->rx_brs = !!(s->rx_frame.flags & QEMU_CAN_FRMF_BRS);
+    /* Low byte is the decoded payload length; upper bits expose the FD/BRS
+     * metadata without changing the legacy length field. */
+    s->regs[R_RX_LEN / 4] = s->rx_len | (s->rx_fd ? BIT(8) : 0) |
+                             (s->rx_brs ? BIT(9) : 0);
     s->regs[R_STATUS / 4] |= R_STATUS_RX_PENDING_MASK;
 }
 
@@ -197,10 +203,28 @@ static void tricore_mcan_send(TriCoreMCANState *s)
             uint32_t brp = (btr & 0x3f) + 1;
             uint32_t tseg1 = ((btr >> 8) & 0xff) + 1;
             uint32_t tseg2 = ((btr >> 16) & 0x0f) + 1;
-            uint32_t bitrate = 100000000u / (brp * (1 + tseg1 + tseg2));
-            uint32_t bits = 47 + 8 * can_dlc2len(frame.can_dlc);
-            uint64_t delay_ns = bitrate ? ((uint64_t)bits * 1000000000ull) /
-                                             bitrate : 0;
+            uint32_t nominal = 100000000u / (brp * (1 + tseg1 + tseg2));
+            uint32_t data_rate = nominal;
+            uint32_t bits = 47;
+            if ((frame.flags & QEMU_CAN_FRMF_TYPE_FD) &&
+                (frame.flags & QEMU_CAN_FRMF_BRS)) {
+                uint32_t dbtr = s->regs[R_NODE0_BTR_FD / 4];
+                uint32_t dbrp = (dbtr & 0x3f) + 1;
+                uint32_t dtseg1 = ((dbtr >> 8) & 0xff) + 1;
+                uint32_t dtseg2 = ((dbtr >> 16) & 0x0f) + 1;
+                data_rate = 100000000u /
+                    (dbrp * (1 + dtseg1 + dtseg2));
+                /* Arbitration/header uses nominal timing; payload and CRC
+                 * use the data phase when bit-rate switching is enabled. */
+                bits += 8 * can_dlc2len(frame.can_dlc) + 24;
+            } else {
+                bits += 8 * can_dlc2len(frame.can_dlc);
+            }
+            uint32_t arb_bits = 47;
+            uint32_t payload_bits = bits - arb_bits;
+            uint64_t delay_ns = nominal && data_rate ?
+                ((uint64_t)arb_bits * 1000000000ull) / nominal +
+                ((uint64_t)payload_bits * 1000000000ull) / data_rate : 0;
             can_bus_client_send_timed(&s->bus_client, &frame, 1, delay_ns);
         } else {
             can_bus_client_send(&s->bus_client, &frame, 1);
@@ -409,6 +433,8 @@ static const VMStateDescription vmstate_tricore_mcan = {
         VMSTATE_UINT8_ARRAY(rx_data, TriCoreMCANState, 64),
         VMSTATE_UINT8(tx_len, TriCoreMCANState),
         VMSTATE_UINT8(rx_len, TriCoreMCANState),
+        VMSTATE_BOOL(rx_fd, TriCoreMCANState),
+        VMSTATE_BOOL(rx_brs, TriCoreMCANState),
         VMSTATE_BOOL(bit_sample_level, TriCoreMCANState),
         VMSTATE_UINT64(bit_sample_time, TriCoreMCANState),
         VMSTATE_END_OF_LIST()
