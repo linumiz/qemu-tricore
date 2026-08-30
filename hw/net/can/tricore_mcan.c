@@ -35,6 +35,8 @@ REG32(MO0_DATAH, 0x914)
 REG32(MO0_AR, 0x918)
 REG32(MO0_CTR, 0x91c)
 REG32(MO0_AMR, 0x90c)
+#define MO_STRIDE 0x20
+#define MO_REG(n, off) ((off) + (n) * MO_STRIDE)
 
 static void tricore_mcan_update_irq(TriCoreMCANState *s)
 {
@@ -58,9 +60,13 @@ static ssize_t tricore_mcan_receive(CanBusClientState *client,
     if (!frames_cnt || s->rx_pending) {
         return 0;
     }
-    /* MultiCAN+ acceptance-mask semantics: a set mask bit is don't-care. */
-    if (((frames[0].can_id ^ s->regs[R_MO0_AR / 4]) &
-         ~s->regs[R_MO0_AMR / 4]) != 0) {
+    unsigned object = 0;
+    while (object < 4 && ((frames[0].can_id ^
+             s->regs[MO_REG(object, R_MO0_AR) / 4]) &
+            ~s->regs[MO_REG(object, R_MO0_AMR) / 4]) != 0) {
+        object++;
+    }
+    if (object == 4) {
         return 0;
     }
     s->rx_frame = frames[0];
@@ -68,9 +74,9 @@ static ssize_t tricore_mcan_receive(CanBusClientState *client,
     s->regs[R_RXID / 4] = s->rx_frame.can_id;
     s->regs[R_RXDATAL / 4] = ldl_le_p(&s->rx_frame.data[0]);
     s->regs[R_RXDATAH / 4] = ldl_le_p(&s->rx_frame.data[4]);
-    s->regs[R_MO0_AR / 4] = s->rx_frame.can_id;
-    s->regs[R_MO0_DATAL / 4] = s->regs[R_RXDATAL / 4];
-    s->regs[R_MO0_DATAH / 4] = s->regs[R_RXDATAH / 4];
+    s->regs[MO_REG(object, R_MO0_AR) / 4] = s->rx_frame.can_id;
+    s->regs[MO_REG(object, R_MO0_DATAL) / 4] = s->regs[R_RXDATAL / 4];
+    s->regs[MO_REG(object, R_MO0_DATAH) / 4] = s->regs[R_RXDATAH / 4];
     s->regs[R_STATUS / 4] |= R_STATUS_RX_PENDING_MASK;
     tricore_mcan_update_irq(s);
     return 1;
@@ -129,15 +135,23 @@ static void tricore_mcan_write(void *opaque, hwaddr addr, uint64_t value,
         s->regs[index] &= ~(uint32_t)value;
     } else if (addr == R_INT_ENABLE || addr == R_CONTROL ||
                addr == R_TXID || addr == R_TXDATAL || addr == R_TXDATAH ||
-               addr == R_MO0_AR || addr == R_MO0_AMR ||
-               addr == R_MO0_DATAL || addr == R_MO0_DATAH) {
+               (addr >= R_MO0_AR && addr < R_MO0_AR + 4 * MO_STRIDE &&
+                ((addr - R_MO0_AR) % MO_STRIDE) == 0) ||
+               (addr >= R_MO0_AMR && addr < R_MO0_AMR + 4 * MO_STRIDE &&
+                ((addr - R_MO0_AMR) % MO_STRIDE) == 0) ||
+               (addr >= R_MO0_DATAL && addr < R_MO0_DATAL + 4 * MO_STRIDE &&
+                ((addr - R_MO0_DATAL) % MO_STRIDE) == 0) ||
+               (addr >= R_MO0_DATAH && addr < R_MO0_DATAH + 4 * MO_STRIDE &&
+                ((addr - R_MO0_DATAH) % MO_STRIDE) == 0)) {
         s->regs[index] = value;
     } else if (addr == R_TXCTRL && (value & 1)) {
         tricore_mcan_send(s);
-    } else if (addr == R_MO0_CTR && (value & 1)) {
-        s->regs[R_TXID / 4] = s->regs[R_MO0_AR / 4];
-        s->regs[R_TXDATAL / 4] = s->regs[R_MO0_DATAL / 4];
-        s->regs[R_TXDATAH / 4] = s->regs[R_MO0_DATAH / 4];
+    } else if (addr >= R_MO0_CTR && addr < R_MO0_CTR + 4 * MO_STRIDE &&
+               ((addr - R_MO0_CTR) % MO_STRIDE) == 0 && (value & 1)) {
+        unsigned object = (addr - R_MO0_CTR) / MO_STRIDE;
+        s->regs[R_TXID / 4] = s->regs[MO_REG(object, R_MO0_AR) / 4];
+        s->regs[R_TXDATAL / 4] = s->regs[MO_REG(object, R_MO0_DATAL) / 4];
+        s->regs[R_TXDATAH / 4] = s->regs[MO_REG(object, R_MO0_DATAH) / 4];
         tricore_mcan_send(s);
     } else if (addr == R_NODE0_CR || addr == R_NODE1_CR ||
                addr == R_NODE2_CR || addr == R_NODE3_CR) {
@@ -186,7 +200,9 @@ static void tricore_mcan_init(Object *obj)
     memory_region_init_io(&s->iomem, obj, &tricore_mcan_ops, s,
                           TYPE_TRICORE_MCAN, 0x2000);
     /* Reset value accepts every identifier until firmware programs a mask. */
-    s->regs[R_MO0_AMR / 4] = UINT32_MAX;
+    for (unsigned i = 0; i < 4; i++) {
+        s->regs[MO_REG(i, R_MO0_AMR) / 4] = UINT32_MAX;
+    }
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
 }
 
