@@ -15,6 +15,7 @@ REG32(STATUS, 0x04)
 FIELD(STATUS, RX_PENDING, 0, 1)
 FIELD(STATUS, TX_COMPLETE, 1, 1)
 FIELD(STATUS, RX_OVERRUN, 2, 1)
+FIELD(STATUS, GATEWAY_EVENT, 3, 1)
 REG32(TXID, 0x08)
 REG32(TXDATAL, 0x0c)
 REG32(TXDATAH, 0x10)
@@ -50,6 +51,7 @@ static void tricore_mcan_update_irq(TriCoreMCANState *s)
     qemu_set_irq(s->irq[0], pending & R_STATUS_RX_PENDING_MASK);
     qemu_set_irq(s->irq[1], pending & R_STATUS_TX_COMPLETE_MASK);
     qemu_set_irq(s->irq[2], pending & R_STATUS_RX_OVERRUN_MASK);
+    qemu_set_irq(s->irq[3], pending & R_STATUS_GATEWAY_EVENT_MASK);
     for (unsigned i = 2; i < 16; i++) {
         qemu_set_irq(s->irq[i], false);
     }
@@ -120,6 +122,7 @@ static ssize_t tricore_mcan_receive(CanBusClientState *client,
         s->regs[MO_REG(target, R_MO0_AR) / 4] = s->rx_frame.can_id;
         s->regs[MO_REG(target, R_MO0_DATAL) / 4] = s->regs[R_RXDATAL / 4];
         s->regs[MO_REG(target, R_MO0_DATAH) / 4] = s->regs[R_RXDATAH / 4];
+        s->regs[R_STATUS / 4] |= R_STATUS_GATEWAY_EVENT_MASK;
     }
     s->regs[R_STATUS / 4] |= R_STATUS_RX_PENDING_MASK;
     tricore_mcan_update_irq(s);
