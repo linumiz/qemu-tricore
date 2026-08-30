@@ -44,6 +44,9 @@ static void tc4x_clock_update_sysccu(TC4xClockState *s)
     if (FIELD_EX32(s->SYSCCUCON0, SYSCCUCON0, LPDIV) != 0) {
         /* In low-power mode the STM clock is fixed to fSYS / 120. */
         clock_update(s->fstm, clock_get(s->fsource0) / 120);
+    } else if (FIELD_EX32(s->SYSCCUCON0, SYSCCUCON0, STMDIV) == 0) {
+        /* STMDIV=0 disables the STM clock (as specified by IfxClock). */
+        clock_update_hz(s->fstm, 0);
     } else {
         UPDATE_DIV_CLK(fstm, clock_get(s->fsource0), SYSCCUCON0, STMDIV);
     }
@@ -231,7 +234,8 @@ static uint64_t tc4x_clock_read(void *opaque, hwaddr offset, unsigned size)
         memcpy(&value, (uint8_t *)&s->SYSPLLCON2 + (offset & 0x3), size);
         break;
     case R_SYSPLLSTAT:
-        if (FIELD_EX32(s->SYSPLLCON0, SYSPLLCON0, PLLPWR) == 1) {
+        if (FIELD_EX32(s->SYSPLLCON0, SYSPLLCON0, PLLPWR) == 1 &&
+            clock_get(s->fosc) != 0) {
             temp = R_SYSPLLSTAT_PLLLOCK_MASK | R_SYSPLLCON0_PLLPWR_MASK;
         }
         memcpy(&value, (uint8_t *)&temp + (offset & 0x3), size);
@@ -246,7 +250,8 @@ static uint64_t tc4x_clock_read(void *opaque, hwaddr offset, unsigned size)
         memcpy(&value, (uint8_t *)&s->PERPLLCON2 + (offset & 0x3), size);
         break;
     case R_PERPLLSTAT:
-        if (FIELD_EX32(s->PERPLLCON0, PERPLLCON0, PLLPWR) == 1) {
+        if (FIELD_EX32(s->PERPLLCON0, PERPLLCON0, PLLPWR) == 1 &&
+            clock_get(s->fosc) != 0) {
             temp = R_PERPLLSTAT_PLLLOCK_MASK | R_PERPLLCON0_PLLPWR_MASK;
         }
         memcpy(&value, (uint8_t *)&temp + (offset & 0x3), size);
