@@ -77,7 +77,7 @@ static void tc27x_pmcsr_write(void *opaque, hwaddr offset,
 
 static uint64_t tc27x_pmcsr_read(void *opaque, hwaddr offset, unsigned size)
 {
-    TC27XDSoCState *s = opaque;
+    (void)opaque;
     unsigned id = offset >> 2;
     return (id < 3 && id > 0) ? 1 : 0;
 }
@@ -304,8 +304,9 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
         memory_region_init_io(&c->region, OBJECT(s), &tc27x_cpu_ctrl_ops,
                               c, name, 0x20000);
         g_free(name);
-        memory_region_add_subregion(sysmem, 0xF8810000 + i * 0x20000,
-                                    &c->region);
+        memory_region_add_subregion_overlap(sysmem,
+                                            0xF8810000 + i * 0x20000,
+                                            &c->region, 100);
     }
 
     sysbus_connect_irq(SYS_BUS_DEVICE(s->asclin), 0,

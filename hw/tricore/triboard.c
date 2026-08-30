@@ -31,6 +31,7 @@
 #include "hw/tricore/tc39xb_soc.h"
 #include "hw/tricore/tc4dx_soc.h"
 #include "hw/tricore/triboard.h"
+#include "system/address-spaces.h"
 
 static void tricore_load_kernel(TriCoreCPU *cpu, const char *kernel_filename)
 {
@@ -46,6 +47,45 @@ static void tricore_load_kernel(TriCoreCPU *cpu, const char *kernel_filename)
     }
     env = &cpu->env;
     env->PC = entry;
+}
+
+typedef struct TC277LoadContext {
+    TC27XDSoCState *soc;
+    uint64_t core_start[3];
+} TC277LoadContext;
+static TC277LoadContext *tc277_load_context;
+
+static void tc277_capture_symbol(const char *name, int info, uint64_t value,
+                                 uint64_t size)
+{
+    TC277LoadContext *ctx = tc277_load_context;
+    if (!ctx) return;
+    if (!strcmp(name, "_Core1_start")) ctx->core_start[1] = value;
+    if (!strcmp(name, "_Core2_start")) ctx->core_start[2] = value;
+}
+
+static void tc277_load_multicore_kernel(TC27XDSoCState *soc,
+                                        const char *kernel_filename)
+{
+    TC277LoadContext ctx = { .soc = soc };
+    uint64_t entry;
+    tc277_load_context = &ctx;
+    if (load_elf_ram_sym(kernel_filename, NULL, NULL, NULL, &entry, NULL,
+                         NULL, NULL, ELFDATA2LSB, EM_TRICORE, 1, 0,
+                         &address_space_memory, false, tc277_capture_symbol) < 0) {
+        error_report("no kernel file '%s'", kernel_filename);
+        exit(1);
+    }
+    tc277_load_context = NULL;
+    soc->cpus[0].env.PC = entry;
+    for (unsigned i = 1; i < 3; i++) {
+        if (ctx.core_start[i]) {
+            soc->cpus[i].env.PC = ctx.core_start[i];
+            CPUState *cs = CPU(&soc->cpus[i]);
+            cs->halted = 0;
+            cpu_resume(cs);
+        }
+    }
 }
 
 static void triboard_machine_tc4d7_init(MachineState *machine)
@@ -88,7 +128,8 @@ static void triboard_machine_tc27xd_init(MachineState *machine)
     sysbus_realize(SYS_BUS_DEVICE(&ms->tc27xd_soc), &error_fatal);
 
     if (machine->kernel_filename) {
-        tricore_load_kernel(&ms->tc27xd_soc.cpus[0], machine->kernel_filename);
+        tc277_load_multicore_kernel(&ms->tc27xd_soc,
+                                    machine->kernel_filename);
     }
 }
 
