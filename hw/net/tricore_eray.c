@@ -452,13 +452,14 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
 {
     TriCoreERAYState *s = opaque;
     switch (off) {
+    /* Public ERAY status/event registers use write-one-to-clear (W1C). */
     case ERAY_CCEV: s->ccev &= ~(value & ERAY_CCEV_MASK); break;
     case ERAY_SUCC1: s->succ1 = value & ERAY_SUCC1_MASK; break;
     case ERAY_NEMC: s->nemc = value & 0x00ffffffu; break;
-    case ERAY_MBSC1: s->mbsc1 &= ~value; break;
-    case ERAY_NDAT1: s->ndat1 &= ~value; break;
-    case ERAY_MBSC0: s->mbsc0 &= ~value; break;
-    case ERAY_NDAT0: s->ndat0 &= ~value; break;
+    case ERAY_MBSC1: s->mbsc1 &= ~value; break; /* W1C */
+    case ERAY_NDAT1: s->ndat1 &= ~value; break; /* W1C */
+    case ERAY_MBSC0: s->mbsc0 &= ~value; break; /* W1C */
+    case ERAY_NDAT0: s->ndat0 &= ~value; break; /* W1C */
     case ERAY_CMD: eray_command(s, value & ERAY_CMD_MASK); break;
     case ERAY_CYCLE: s->cycle = (value & ERAY_CYCLE_MASK) %
                                   MAX(1u, s->cycle_length); break;

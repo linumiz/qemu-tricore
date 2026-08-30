@@ -96,6 +96,12 @@ static void test_eray_profiles(void)
     qtest_writel(global_qtest, 0xF4432000 + 720 * 4, (1u << 25));
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF4432000 + 720 * 4) &
                      (1u << 24), ==, 0);
+    /* SRC SETR is the interrupt-router W1S counterpart to CLRR. */
+    qtest_writel(global_qtest, 0xF4432000 + 720 * 4,
+                 1 | (1u << 23) | (1u << 26));
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF4432000 + 720 * 4) &
+                     (1u << 24), !=, 0);
+    qtest_writel(global_qtest, 0xF4432000 + 720 * 4, (1u << 25));
     /* CCEV is W1C on both TC4x ERAY instances; clear the illegal-command
      * events before exercising the message (INT1) sources. */
     qtest_writel(global_qtest, 0xF441C104, 1);
@@ -130,6 +136,13 @@ static void test_eray_profiles(void)
                      (1u << 24), !=, 0);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF4432000 + 723 * 4) &
                      (1u << 24), !=, 0);
+    /* NDAT0 and MBSC0 are independent W1C status groups for channel A. */
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D0F4) & 1, !=, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D0F0) & 1, !=, 0);
+    qtest_writel(global_qtest, 0xF441D0F4, 1);
+    qtest_writel(global_qtest, 0xF441D0F0, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D0F4) & 1, ==, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D0F0) & 1, ==, 0);
     /* Channel-B uses an independent unlock/commit path and sets NDAT1. */
     qtest_writel(global_qtest, 0xF441C124, 1);
     qtest_writel(global_qtest, 0xF441C128, 2 | 4);
