@@ -31,6 +31,8 @@ qtests_generic = [
   'readconfig-test',
   'netdev-socket',
 ]
+
+qtests_tricore = [ 'tricore-can-transport' ]
 if enable_modules
   qtests_generic += [ 'modules-test' ]
 endif
