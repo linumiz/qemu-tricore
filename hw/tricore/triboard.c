@@ -126,6 +126,10 @@ static void triboard_machine_tc27xd_init(MachineState *machine)
 
     object_initialize_child(OBJECT(machine), "tc27xd_soc", &ms->tc27xd_soc,
                             amc->soc_name);
+    if (ms->canbus) {
+        object_property_set_link(OBJECT(&ms->tc27xd_soc), "canbus",
+                                 OBJECT(ms->canbus), &error_fatal);
+    }
     sysbus_realize(SYS_BUS_DEVICE(&ms->tc27xd_soc), &error_fatal);
 
     if (machine->kernel_filename) {
@@ -194,6 +198,14 @@ static void triboard_machine_tc397b_class_init(ObjectClass *oc,
     amc->soc_name = "tc397b-soc";
 };
 
+static void triboard_machine_class_init(ObjectClass *oc, const void *data)
+{
+    object_class_property_add_link(oc, "canbus", TYPE_CAN_BUS,
+                                   offsetof(TriBoardMachineState, canbus),
+                                   object_property_allow_set_link,
+                                   OBJ_PROP_LINK_STRONG);
+}
+
 static const TypeInfo triboard_machine_types[] = {
     {
         .name = TYPE_TRIBOARD_MACHINE,
@@ -201,6 +213,7 @@ static const TypeInfo triboard_machine_types[] = {
         .instance_size = sizeof(TriBoardMachineState),
         .class_size = sizeof(TriBoardMachineClass),
         .abstract = true,
+        .class_init = triboard_machine_class_init,
     },
     {
         .name = MACHINE_TYPE_NAME("KIT_AURIX_TC277_TRB"),

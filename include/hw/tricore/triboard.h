@@ -23,6 +23,7 @@
 #include "system/system.h"
 #include "system/address-spaces.h"
 #include "qom/object.h"
+#include "net/can_emu.h"
 
 #include "hw/tricore/tc27xd_soc.h"
 #include "hw/tricore/tc39xb_soc.h"
@@ -39,6 +40,7 @@ struct TriBoardMachineState {
 
     TC27XDSoCState tc27xd_soc;
     TC39XBSoCState tc39xb_soc;
+    CanBusState *canbus;
 };
 
 struct TriBoardMachineClass {
