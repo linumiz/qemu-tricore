@@ -424,16 +424,20 @@ static void tc27xd_soc_init(Object *obj)
     }
 }
 
+/* QOM retains the property table after class initialization for HMP output. */
+static Property tc27xd_soc_props[] = {
+    DEFINE_PROP_LINK("canbus", TC27XDSoCState, canbus,
+                     TYPE_CAN_BUS, CanBusState *),
+};
+
 static void tc27xd_soc_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = tc27xd_soc_realize;
     dc->legacy_reset = tc27xd_soc_reset;
-    device_class_set_props_n(dc, (Property[]) {
-        DEFINE_PROP_LINK("canbus", TC27XDSoCState, canbus,
-                         TYPE_CAN_BUS, CanBusState *),
-    }, 1);
+    device_class_set_props_n(dc, tc27xd_soc_props,
+                             ARRAY_SIZE(tc27xd_soc_props));
 }
 
 static void tc277d_soc_class_init(ObjectClass *oc, const void *data)
