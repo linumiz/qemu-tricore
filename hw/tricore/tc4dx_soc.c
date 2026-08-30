@@ -98,9 +98,9 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
 
     create_unimplemented_device("tc4x-sfr", 0xF0000000, 0x400000);
 
-    for (i = 0; i < 1; i++) {
+    for (i = 0; i < TC4DX_MAX_ASCLIN; i++) {
         dev = DEVICE(&s->asclin[i]);
-        qdev_prop_set_chr(DEVICE(&s->asclin[i]), "chardev", serial_hd(0));
+        qdev_prop_set_chr(DEVICE(&s->asclin[i]), "chardev", serial_hd(i));
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->asclin[i]), errp)) {
             return;
         }
@@ -129,7 +129,11 @@ static void tc4dx_soc_init(Object *obj)
     }
     object_initialize_child(obj, "ir", &s->ir, TYPE_TRICORE_IR);
     object_initialize_child(obj, "clock", &s->clock, TYPE_TC4X_CLOCK);
-    object_initialize_child(obj, "asclin", &s->asclin[0], TYPE_TRICORE_ASCLIN);
+    for (unsigned i = 0; i < TC4DX_MAX_ASCLIN; i++) {
+        char *name = g_strdup_printf("asclin%u", i);
+        object_initialize_child(obj, name, &s->asclin[i], TYPE_TRICORE_ASCLIN);
+        g_free(name);
+    }
 
     s->fosc = qdev_init_clock_in(DEVICE(s), "fosc", NULL, NULL, 0);
 }
