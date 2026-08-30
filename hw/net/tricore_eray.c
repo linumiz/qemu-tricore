@@ -164,9 +164,17 @@ static void eray_scheduler_cb(void *opaque)
         }
         s->ccev |= CCEV_CYCLE_START;
         if (s->tx_pending && s->cycle == s->tx_due_cycle) {
-            /* A pending request is released only at its configured slot.  A
-             * single virtual timer represents the macrocycle; the slot marker
-             * keeps ordering deterministic while avoiding wall-clock timing. */
+            /* Static frames are virtual-time events at their numbered slot,
+             * not merely at cycle rollover.  If the cycle matched before the
+             * slot, defer to the next cycle; this keeps every static slot
+             * observable while retaining deterministic qtest timing. */
+            if (s->tx_frame_id <= s->static_slots &&
+                s->slot_counter != s->tx_due_slot) {
+                s->tx_due_cycle = (s->cycle + 1) % MAX(1u, s->cycle_length);
+                eray_update_irq(s);
+                eray_schedule(s);
+                return;
+            }
             s->slot_status = (s->slot_status & 0xffff0000) |
                              (s->tx_due_slot & 0x7ff);
             eray_deliver_frame(s, s->tx_frame_id, s->tx_frame);

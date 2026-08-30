@@ -210,6 +210,7 @@ static void test_eray_profiles(void)
     qtest_writel(global_qtest, 0xF441C134, 1); /* one static slot */
     qtest_writel(global_qtest, 0xF441C138, 2); /* dynamic segment starts at 2 */
     qtest_writel(global_qtest, 0xF441C130, 1);
+    qtest_writel(global_qtest, 0xF441C124, 0); /* select buffer 0 again */
     qtest_writel(global_qtest, 0xF441E000, 101);
     qtest_writel(global_qtest, 0xF441C128, 2); /* unlock */
     qtest_writel(global_qtest, 0xF441C128, 1); /* commit */
