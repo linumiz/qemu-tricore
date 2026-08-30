@@ -139,6 +139,9 @@ ssize_t can_bus_client_send_bits(CanBusClientState *, const uint8_t *bits,
                                  size_t bit_count, uint64_t bit_time_ns,
                                  uint64_t start_time_ns);
 
+/* CAN uses a dominant-low wired-AND bus: any dominant bit wins. */
+bool can_bus_wired_and(const bool *drives, size_t drive_count);
+
 int can_bus_client_set_filters(CanBusClientState *,
                                const struct qemu_can_filter *filters,
                                size_t filters_cnt);

@@ -215,6 +215,15 @@ ssize_t can_bus_client_send_bits(CanBusClientState *client,
     return bit_count;
 }
 
+bool can_bus_wired_and(const bool *drives, size_t drive_count)
+{
+    bool level = true;
+    for (size_t i = 0; i < drive_count; i++) {
+        level &= drives[i];
+    }
+    return level;
+}
+
 int can_bus_filter_match(struct qemu_can_filter *filter, qemu_canid_t can_id)
 {
     int m;
