@@ -291,8 +291,9 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     memory_region_add_subregion_overlap(sysmem, 0xF00360D4, &s->pmcsr_region,
                                         1);
 
+    /* TC2x/TC27x iLLD default: fPLL=300 MHz, STMDIV=3 => fSTM=100 MHz. */
     Clock *fstm = clock_new(OBJECT(dev_soc), "fstm");
-    clock_set_hz(fstm, 50000000);
+    clock_set_hz(fstm, 100000000);
     qdev_connect_clock_in(DEVICE(s->stm), "fstm", fstm);
 
     object_property_add_const_link(OBJECT(s->scu), "cpu", OBJECT(&s->cpus[0]));

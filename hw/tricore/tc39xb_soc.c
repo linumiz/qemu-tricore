@@ -354,9 +354,9 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
 
     MemoryRegion *sysmem = get_system_memory();
 
-    /* STM clock: fPLL=300MHz / STMDIV=3 = 100MHz */
+    /* TC3x iLLD default: fPLL=300 MHz, STMDIV=3 => fSTM=100 MHz. */
     Clock *fstm = clock_new(OBJECT(dev_soc), "fstm");
-    clock_set_hz(fstm, 50000000);
+    clock_set_hz(fstm, 100000000);
     qdev_connect_clock_in(DEVICE(s->stm), "fstm", fstm);
 
     object_property_add_const_link(OBJECT(s->scu), "cpu", OBJECT(&s->cpus[0]));
