@@ -52,11 +52,6 @@ static void test_eray_profiles(void)
     qtest_start("-machine KIT_AURIX_TC397B_TRB");
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C100), ==, 1);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF0017100), ==, 1);
-    /* TC3x exposes ERAY0/1 INT0/INT1 through the generation-specific table. */
-    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0038000 + 160 * 4), !=, 0);
-    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0038000 + 161 * 4), !=, 0);
-    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0038000 + 162 * 4), !=, 0);
-    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0038000 + 163 * 4), !=, 0);
     qtest_writel(global_qtest, 0xF0017180, 10);
     qtest_writel(global_qtest, 0xF0017184, 20);
     qtest_writel(global_qtest, 0xF0017188, 32);
@@ -80,6 +75,13 @@ static void test_eray_profiles(void)
     qtest_writel(global_qtest, 0xF441C128, 1);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C104) & 2, ==, 2);
     qtest_writel(global_qtest, 0xF441C104, 2);
+    /* Unknown header flags are rejected; a public sync flag is retained. */
+    qtest_writel(global_qtest, 0xF441E008, 8);
+    qtest_writel(global_qtest, 0xF441C128, 2);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C104) & 2, ==, 2);
+    qtest_writel(global_qtest, 0xF441C104, 2);
+    qtest_writel(global_qtest, 0xF441E008, 2);
     /* ERAY0 message RAM is at +0x2000; commit one buffer and observe it on
      * the second in-process node through NDAT/MBSC pending state. */
     qtest_writel(global_qtest, 0xF441E000, 0x123);

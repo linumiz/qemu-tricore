@@ -55,6 +55,15 @@
 #define ERAY_ACTION_STATIC 0x18c
 #define ERAY_ACTION_DYNAMIC 0x190
 
+/* Compact public-fixture header flags: cycle bit plus null/sync/startup. */
+#define ERAY_HDR_CYCLE_SHIFT 8
+#define ERAY_HDR_CYCLE_MASK  (0x3fu << ERAY_HDR_CYCLE_SHIFT)
+#define ERAY_HDR_NULL        BIT(0)
+#define ERAY_HDR_SYNC        BIT(1)
+#define ERAY_HDR_STARTUP     BIT(2)
+#define ERAY_HDR_PUBLIC_MASK (ERAY_HDR_CYCLE_MASK | ERAY_HDR_NULL | \
+                              ERAY_HDR_SYNC | ERAY_HDR_STARTUP)
+
 /* CCEV bits used by the portable model.  These map to the public error/event
  * classes; keeping them explicit makes invalid host requests observable in
  * QTests without pretending to emulate undocumented PHY diagnostics. */
@@ -190,6 +199,7 @@ static void eray_commit_message(TriCoreERAYState *s)
     s->host_busy = 1;
     uint32_t payload_len = ldl_le_p(&s->msg_data[offset + 4]) & 0x7f;
     uint32_t encoded_payload_len = payload_len;
+    uint32_t header_flags = ldl_le_p(&s->msg_data[offset + 8]);
     if (!payload_len) {
         payload_len = 64;
     }
@@ -197,7 +207,9 @@ static void eray_commit_message(TriCoreERAYState *s)
      * header: word 0 is the 11-bit frame ID, word 1 the payload length, and
      * word 2 carries null/sync/startup flags.  Reject IDs outside the public
      * FlexRay range and lengths that cannot fit this 64-byte model. */
-    if ((frame_id & ~0x7ffu) || encoded_payload_len > sizeof(s->tx_frame)) {
+    if ((frame_id & ~0x7ffu) || encoded_payload_len > sizeof(s->tx_frame) ||
+        (header_flags & ~ERAY_HDR_PUBLIC_MASK) ||
+        ((header_flags & ERAY_HDR_NULL) && encoded_payload_len != 0)) {
         s->ccev |= CCEV_HEADER_ERROR;
         s->host_busy = 0;
         eray_update_irq(s);
@@ -213,6 +225,8 @@ static void eray_commit_message(TriCoreERAYState *s)
     s->slot_status = (frame_id & 0x7ff) | ((s->cycle & 0x3f) << 16) |
                      ((payload_len & 0x7f) << 8) |
                      ((s->mbctrl & MBCTRL_CHANNEL_B) ? BIT(31) : 0);
+    s->tx_header_flags = header_flags;
+    s->slot_status |= header_flags & ERAY_HDR_PUBLIC_MASK;
     if (s->guardian || !(s->channel_mask & ((s->mbctrl & MBCTRL_CHANNEL_B) ? 2 : 1))) {
         s->ccev |= CCEV_SLOT_ERROR; /* bus guardian/channel violation */
         eray_update_irq(s);
@@ -479,6 +493,7 @@ static void eray_reset(DeviceState *dev)
     s->last_rx_id = s->last_rx_cycle = 0;
     s->last_rx_channel = 0;
     s->sched_cfg = s->tx_frame_id = s->tx_due_cycle = s->tx_due_slot = 0;
+    s->tx_header_flags = 0;
     s->sched_period_ns = ERAY_CYCLE_NS;
     s->tx_pending = false;
     s->tx_payload_len = 0;
@@ -560,6 +575,7 @@ static const VMStateDescription vmstate_eray = {
         VMSTATE_UINT32(tx_due_cycle, TriCoreERAYState),
         VMSTATE_UINT32(tx_due_slot, TriCoreERAYState),
         VMSTATE_UINT32(tx_payload_len, TriCoreERAYState),
+        VMSTATE_UINT32(tx_header_flags, TriCoreERAYState),
         VMSTATE_BOOL(tx_pending, TriCoreERAYState),
         VMSTATE_UINT8_ARRAY(tx_frame, TriCoreERAYState, 64),
         VMSTATE_UINT8_ARRAY(msg_data, TriCoreERAYState, sizeof(((TriCoreERAYState *)0)->msg_data)),
