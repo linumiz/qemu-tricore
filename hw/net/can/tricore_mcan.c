@@ -308,12 +308,23 @@ static void tricore_mcan_write(void *opaque, hwaddr addr, uint64_t value,
     } else if (addr == R_TXCTRL && (value & 1)) {
         tricore_mcan_send(s);
     } else if (addr >= R_MO0_CTR && addr < R_MO0_CTR + MCAN_OBJECTS * MO_STRIDE &&
-               ((addr - R_MO0_CTR) % MO_STRIDE) == 0 && (value & 1)) {
+               ((addr - R_MO0_CTR) % MO_STRIDE) == 0) {
         unsigned object = (addr - R_MO0_CTR) / MO_STRIDE;
-        s->regs[R_TXID / 4] = s->regs[MO_REG(object, R_MO0_AR) / 4];
-        s->regs[R_TXDATAL / 4] = s->regs[MO_REG(object, R_MO0_DATAL) / 4];
-        s->regs[R_TXDATAH / 4] = s->regs[MO_REG(object, R_MO0_DATAH) / 4];
-        tricore_mcan_send(s);
+        /* Message-object control follows the documented command bits: TX
+         * request, clear pending and invalidate. */
+        if (value & BIT(1)) {
+            s->object_pending[object] = false;
+        }
+        if (value & BIT(2)) {
+            s->object_valid[object] = false;
+            s->object_pending[object] = false;
+        }
+        if (value & BIT(0)) {
+            s->regs[R_TXID / 4] = s->regs[MO_REG(object, R_MO0_AR) / 4];
+            s->regs[R_TXDATAL / 4] = s->regs[MO_REG(object, R_MO0_DATAL) / 4];
+            s->regs[R_TXDATAH / 4] = s->regs[MO_REG(object, R_MO0_DATAH) / 4];
+            tricore_mcan_send(s);
+        }
     } else if (addr == R_NODE0_CR || addr == R_NODE1_CR ||
                addr == R_NODE2_CR || addr == R_NODE3_CR) {
         /* INIT/CCE sequencing is intentionally collapsed to the enable bit
