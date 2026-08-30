@@ -75,9 +75,12 @@ struct CanBusState {
 
     QTAILQ_HEAD(, CanBusClientState) clients;
     QEMUTimer *event_timer;
-    CanBusClientState *event_sender;
-    qemu_can_frame event_frame;
-    size_t event_count;
+    struct {
+        CanBusClientState *sender;
+        qemu_can_frame frame;
+        uint64_t deadline;
+    } events[16];
+    unsigned event_head, event_count;
 };
 
 static ssize_t can_bus_dispatch(CanBusState *bus, CanBusClientState *client,
@@ -97,10 +100,17 @@ static ssize_t can_bus_dispatch(CanBusState *bus, CanBusClientState *client,
 static void can_bus_event_cb(void *opaque)
 {
     CanBusState *bus = opaque;
-    can_bus_dispatch(bus, bus->event_sender, &bus->event_frame,
-                     bus->event_count);
-    bus->event_sender = NULL;
-    bus->event_count = 0;
+    if (!bus->event_count) {
+        return;
+    }
+    unsigned index = bus->event_head;
+    can_bus_dispatch(bus, bus->events[index].sender, &bus->events[index].frame, 1);
+    bus->event_head = (bus->event_head + 1) % ARRAY_SIZE(bus->events);
+    bus->event_count--;
+    if (bus->event_count) {
+        timer_mod_ns(bus->event_timer,
+                     bus->events[bus->event_head].deadline);
+    }
 }
 
 static void can_bus_instance_init(Object *object)
@@ -146,16 +156,21 @@ ssize_t can_bus_client_send_timed(CanBusClientState *client,
                                   size_t frames_cnt, uint64_t delay_ns)
 {
     CanBusState *bus = client->bus;
-    if (!bus || !frames_cnt || frames_cnt > 1 || bus->event_sender) {
+    if (!bus || !frames_cnt || frames_cnt > 1 ||
+        bus->event_count == ARRAY_SIZE(bus->events)) {
         return -1;
     }
     /* The scheduler is deliberately transport-level: controllers provide the
      * delay computed from their nominal/data bit timing, while legacy users
      * continue to use atomic can_bus_client_send(). */
-    bus->event_sender = client;
-    bus->event_frame = frames[0];
-    bus->event_count = 1;
-    timer_mod_ns(bus->event_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + delay_ns);
+    unsigned slot = (bus->event_head + bus->event_count) % ARRAY_SIZE(bus->events);
+    bus->events[slot].sender = client;
+    bus->events[slot].frame = frames[0];
+    bus->events[slot].deadline = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + delay_ns;
+    if (!bus->event_count) {
+        timer_mod_ns(bus->event_timer, bus->events[slot].deadline);
+    }
+    bus->event_count++;
     return 0;
 }
 
