@@ -24,6 +24,8 @@
 
 #include <inttypes.h>
 
+static GPtrArray *asclin_lin_bus;
+
 /*
  * TC3x register offsets are 0x00..0x50, one per 4-byte slot.
  * Enum indices below are offset/4 for TC3x. TC4x offsets start at 0x100
@@ -125,6 +127,19 @@ static bool asclin_lin_mode(TriCoreASCLINState *s)
     return ((s->regs[FRAMECON] >> 0) & 0x7) == 3;
 }
 
+static void asclin_lin_bus_receive(TriCoreASCLINState *s, uint8_t byte)
+{
+    if (asclin_buffer_free(s) == 0) {
+        qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RFO);
+        asclin_pulse_irq(s, MASK_FLAGS_RFO);
+        return;
+    }
+    s->rxbuf[s->rxbufwriteidx] = byte;
+    s->rxbufwriteidx = (s->rxbufwriteidx + 1) % ASCLIN_RX_BUFFER;
+    qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RFL | MASK_FLAGS_RR | MASK_FLAGS_RH);
+    asclin_pulse_irq(s, MASK_FLAGS_RFL);
+}
+
 /*
  * Retry callback when the chardev backend was busy on the last attempt.
  */
@@ -177,10 +192,16 @@ static void asclin_txdata_write(TriCoreASCLINState *s, uint32_t value)
             qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TFO);
             asclin_pulse_irq(s, MASK_FLAGS_TFO);
         } else {
-            s->rxbuf[s->rxbufwriteidx] = value;
-            s->rxbufwriteidx = (s->rxbufwriteidx + 1) % ASCLIN_RX_BUFFER;
-            qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RFL);
-            asclin_pulse_irq(s, MASK_FLAGS_RFL);
+            asclin_lin_bus_receive(s, value);
+        }
+    }
+
+    if (asclin_lin_mode(s) && asclin_lin_bus) {
+        for (guint i = 0; i < asclin_lin_bus->len; i++) {
+            TriCoreASCLINState *peer = g_ptr_array_index(asclin_lin_bus, i);
+            if (peer != s && asclin_lin_mode(peer)) {
+                asclin_lin_bus_receive(peer, value);
+            }
         }
     }
 
@@ -654,8 +675,24 @@ static void asclin_uart_realize(DeviceState *dev, Error **errp)
 {
     TriCoreASCLINState *s = TRICORE_ASCLIN(dev);
 
+    if (!asclin_lin_bus) {
+        asclin_lin_bus = g_ptr_array_new();
+    }
+    g_ptr_array_add(asclin_lin_bus, s);
+
     qemu_chr_fe_set_handlers(&s->chr, uart_can_rx, uart_rx, uart_event, NULL,
                              s, NULL, true);
+}
+
+static void asclin_uart_unrealize(DeviceState *dev)
+{
+    TriCoreASCLINState *s = TRICORE_ASCLIN(dev);
+
+    if (asclin_lin_bus) {
+        g_ptr_array_remove_fast(asclin_lin_bus, s);
+    }
+    qemu_chr_fe_set_handlers(&s->chr, NULL, NULL, NULL, NULL,
+                             NULL, NULL, false);
 }
 
 static void asclin_uart_init(Object *obj)
@@ -714,6 +751,7 @@ static void asclin_uart_class_init(ObjectClass *klass, const void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = asclin_uart_realize;
+    dc->unrealize = asclin_uart_unrealize;
     dc->legacy_reset = asclin_uart_reset;
     dc->vmsd = &vmstate_asclin_uart;
     device_class_set_props(dc, asclin_uart_properties);
