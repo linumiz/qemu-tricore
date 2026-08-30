@@ -47,3 +47,6 @@ pl330_iomem_read(uint32_t addr, uint32_t data) "addr: 0x%08"PRIx32" data: 0x%08"
 
 # xilinx_axidma.c
 xilinx_axidma_loading_desc_fail(uint32_t res) "error:%u"
+# tricore_dma.c
+tricore_dma_descriptor_error(uint32_t address, uint32_t status) "descriptor error address=0x%08x status=0x%08x"
+tricore_dma_unimplemented(uint64_t offset, uint64_t value) "unimplemented offset=0x%" PRIx64 " value=0x%" PRIx64

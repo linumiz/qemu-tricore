@@ -7,6 +7,7 @@
 #include "hw/core/qdev-properties.h"
 #include "qemu/log.h"
 #include "hw/net/tricore_mcan.h"
+#include "trace.h"
 
 REG32(CONTROL, 0x00)
 FIELD(CONTROL, ENABLE, 0, 1)
@@ -94,6 +95,7 @@ static void tricore_mcan_load_rx(TriCoreMCANState *s)
     /* TC4x DRE request 16 is emitted when an accepted RX message reaches the
      * message-object/FIFO state, allowing the SoC DMA engine to drain it. */
     if (s->dma) {
+        trace_tricore_mcan_dma_request(TRICORE_DMA_REQ_MCAN0, 1);
         tricore_dma_request(s->dma, TRICORE_DMA_REQ_MCAN0);
     }
 }
@@ -238,6 +240,7 @@ static void tricore_mcan_send(TriCoreMCANState *s)
     }
     s->regs[R_STATUS / 4] |= R_STATUS_TX_COMPLETE_MASK;
     if (s->dma) {
+        trace_tricore_mcan_dma_request(TRICORE_DMA_REQ_MCAN0, 0);
         tricore_dma_request(s->dma, TRICORE_DMA_REQ_MCAN0);
     }
     tricore_mcan_update_irq(s);

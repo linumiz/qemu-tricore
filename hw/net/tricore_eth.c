@@ -23,6 +23,7 @@
 #include "net/checksum.h"
 #include "qemu/timer.h"
 #include "system/dma.h"
+#include "trace.h"
 
 #define ETH_CTRL      0x00
 #define ETH_STATUS    0x04
@@ -110,7 +111,10 @@ static void tricore_eth_tx_descriptor(TriCoreETHState *s)
     uint32_t d[4];
     uint8_t frame[2048];
     if (!s->tx_desc || dma_memory_read(&address_space_memory, s->tx_desc,
-                                       d, sizeof(d), MEMTXATTRS_UNSPECIFIED)) return;
+                                       d, sizeof(d), MEMTXATTRS_UNSPECIFIED)) {
+        trace_tricore_eth_descriptor_error(s->tx_desc, 1);
+        return;
+    }
     for (int i = 0; i < 4; i++) d[i] = le32_to_cpu(d[i]);
     if (!(d[0] & BIT(31))) return;
     uint32_t len = MIN(d[1] & 0x7ff, sizeof(frame));
@@ -145,7 +149,10 @@ static bool tricore_eth_rx_descriptor(TriCoreETHState *s,
 {
     uint32_t d[4];
     if (!s->rx_desc || dma_memory_read(&address_space_memory, s->rx_desc,
-                                       d, sizeof(d), MEMTXATTRS_UNSPECIFIED)) return false;
+                                       d, sizeof(d), MEMTXATTRS_UNSPECIFIED)) {
+        trace_tricore_eth_descriptor_error(s->rx_desc, 1);
+        return false;
+    }
     for (int i = 0; i < 4; i++) d[i] = le32_to_cpu(d[i]);
     if (!(d[0] & BIT(31))) return false;
     uint32_t copied = MIN(MIN(len, d[1] & 0x7ff), 2048u);
@@ -191,7 +198,9 @@ static uint64_t tricore_eth_read(void *opaque, hwaddr off, unsigned size)
     case ETH_RX_LEN: return s->rx_len;
     case ETH_RX_DATA:
         return s->rx_pos < s->rx_len ? s->rx_buf[s->rx_pos++] : 0;
-    default: return 0;
+    default:
+        trace_tricore_eth_unimplemented(off, 0, 0);
+        return 0;
     }
 }
 
@@ -224,7 +233,9 @@ static void tricore_eth_write(void *opaque, hwaddr off, uint64_t value,
         s->rx_len = 0; s->rx_pos = 0; s->status &= ~STAT_RX_AVAIL;
         s->int_status &= ~INT_RX;
         break;
-    default: break;
+    default:
+        trace_tricore_eth_unimplemented(off, value, 1);
+        break;
     }
     tricore_eth_update_irq(s);
 }

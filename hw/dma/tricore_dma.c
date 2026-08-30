@@ -1,5 +1,6 @@
 #include "qemu/osdep.h"
 #include "hw/dma/tricore_dma.h"
+#include "trace.h"
 #include "system/address-spaces.h"
 #include "system/memory.h"
 #include "hw/core/irq.h"
@@ -41,7 +42,7 @@ static uint64_t dma_read(void *opaque, hwaddr off, unsigned size)
     case 0x18: return s->request; case 0x1c: return s->accen;
     case 0x20: return s->error_enable; case 0x24: return s->status;
     case 0x28: return s->priority;
-    default: return 0; }
+    default: trace_tricore_dma_unimplemented(off, 0); return 0; }
 }
 
 static void dma_write(void *opaque, hwaddr off, uint64_t value, unsigned size)
@@ -83,6 +84,8 @@ static void dma_write(void *opaque, hwaddr off, uint64_t value, unsigned size)
                                            MEMTXATTRS_UNSPECIFIED, d, sizeof(d));
                     if (r != MEMTX_OK || !d[2] || d[2] > 16 * 1024 * 1024) {
                         s->status = DMA_STAT_DESC_ERROR;
+                        trace_tricore_dma_descriptor_error(s->descriptor,
+                                                           s->status);
                         break;
                     }
                     src = le32_to_cpu(d[0]); dst = le32_to_cpu(d[1]);
@@ -111,7 +114,7 @@ static void dma_write(void *opaque, hwaddr off, uint64_t value, unsigned size)
             }
         }
         break;
-    default: break;
+    default: trace_tricore_dma_unimplemented(off, value); break;
     }
 }
 
