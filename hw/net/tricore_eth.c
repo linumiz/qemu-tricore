@@ -6,6 +6,7 @@
 #include "migration/vmstate.h"
 #include "net/eth.h"
 #include "net/net.h"
+#include "system/dma.h"
 
 #define ETH_CTRL      0x00
 #define ETH_STATUS    0x04
@@ -18,6 +19,9 @@
 #define ETH_MAC_LOW   0x20
 #define ETH_MAC_HIGH  0x24
 #define ETH_TX_LEN    0x28
+#define ETH_TX_KICK   0x2c
+#define ETH_VLAN_CTRL 0x30
+#define ETH_CSUM_CTRL 0x34
 #define ETH_TX_DATA   0x40
 #define ETH_RX_LEN    0x44
 #define ETH_RX_DATA   0x48
@@ -42,12 +46,18 @@ static bool tricore_eth_can_receive(NetClientState *nc)
     return (s->control & CTRL_RX_EN) && !s->rx_len;
 }
 
+static bool tricore_eth_rx_descriptor(TriCoreETHState *s,
+                                       const uint8_t *buf, size_t len);
+
 static ssize_t tricore_eth_receive(NetClientState *nc, const uint8_t *buf,
                                    size_t len)
 {
     TriCoreETHState *s = TRICORE_ETH(qemu_get_nic_opaque(nc));
     if (!tricore_eth_can_receive(nc)) {
         return 0;
+    }
+    if (tricore_eth_rx_descriptor(s, buf, len)) {
+        return len;
     }
     s->rx_len = MIN(len, sizeof(s->rx_buf));
     memcpy(s->rx_buf, buf, s->rx_len);
@@ -68,6 +78,52 @@ static void tricore_eth_tx(TriCoreETHState *s)
     }
 }
 
+/* Process one iLLD four-word descriptor through QEMU system DMA. */
+static void tricore_eth_tx_descriptor(TriCoreETHState *s)
+{
+    uint32_t d[4];
+    uint8_t frame[2048];
+    if (!s->tx_desc || dma_memory_read(&address_space_memory, s->tx_desc,
+                                       d, sizeof(d), MEMTXATTRS_UNSPECIFIED)) return;
+    for (int i = 0; i < 4; i++) d[i] = le32_to_cpu(d[i]);
+    if (!(d[0] & BIT(31))) return;
+    uint32_t len = MIN(d[1] & 0x7ff, sizeof(frame));
+    if (!len || dma_memory_read(&address_space_memory, d[2], frame, len,
+                                MEMTXATTRS_UNSPECIFIED)) return;
+    qemu_send_packet(qemu_get_queue(s->nic), frame, len);
+    d[0] &= ~BIT(31);
+    d[0] |= BIT(17); /* completion timestamp/status */
+    bool end = d[1] & BIT(25);
+    for (int i = 0; i < 4; i++) d[i] = cpu_to_le32(d[i]);
+    dma_memory_write(&address_space_memory, s->tx_desc, d, sizeof(d),
+                     MEMTXATTRS_UNSPECIFIED);
+    s->tx_desc = end ? s->tx_desc : s->tx_desc + 16;
+    s->int_status |= INT_TX;
+    tricore_eth_update_irq(s);
+}
+
+static bool tricore_eth_rx_descriptor(TriCoreETHState *s,
+                                       const uint8_t *buf, size_t len)
+{
+    uint32_t d[4];
+    if (!s->rx_desc || dma_memory_read(&address_space_memory, s->rx_desc,
+                                       d, sizeof(d), MEMTXATTRS_UNSPECIFIED)) return false;
+    for (int i = 0; i < 4; i++) d[i] = le32_to_cpu(d[i]);
+    if (!(d[0] & BIT(31))) return false;
+    uint32_t copied = MIN(MIN(len, d[1] & 0x7ff), 2048u);
+    if (dma_memory_write(&address_space_memory, d[2], buf, copied,
+                         MEMTXATTRS_UNSPECIFIED)) return false;
+    bool end = d[1] & BIT(25);
+    d[0] = BIT(8) | BIT(9) | (copied << 16); /* LS, FS, frame length */
+    for (int i = 0; i < 4; i++) d[i] = cpu_to_le32(d[i]);
+    dma_memory_write(&address_space_memory, s->rx_desc, d, sizeof(d),
+                     MEMTXATTRS_UNSPECIFIED);
+    s->rx_desc = end ? s->rx_desc : s->rx_desc + 16;
+    s->int_status |= INT_RX;
+    tricore_eth_update_irq(s);
+    return true;
+}
+
 static uint64_t tricore_eth_read(void *opaque, hwaddr off, unsigned size)
 {
     TriCoreETHState *s = opaque;
@@ -83,6 +139,8 @@ static uint64_t tricore_eth_read(void *opaque, hwaddr off, unsigned size)
     case ETH_MAC_LOW: return s->mac_low;
     case ETH_MAC_HIGH: return s->mac_high;
     case ETH_TX_LEN: return s->tx_len;
+    case ETH_VLAN_CTRL: return s->vlan_ctrl;
+    case ETH_CSUM_CTRL: return s->checksum_ctrl;
     case ETH_RX_LEN: return s->rx_len;
     case ETH_RX_DATA:
         return s->rx_pos < s->rx_len ? s->rx_buf[s->rx_pos++] : 0;
@@ -109,6 +167,9 @@ static void tricore_eth_write(void *opaque, hwaddr off, uint64_t value,
     case ETH_MAC_LOW: s->mac_low = value; break;
     case ETH_MAC_HIGH: s->mac_high = value & 0xffff; break;
     case ETH_TX_LEN: s->tx_len = MIN(value, sizeof(s->tx_buf)); tricore_eth_tx(s); break;
+    case ETH_TX_KICK: tricore_eth_tx_descriptor(s); break;
+    case ETH_VLAN_CTRL: s->vlan_ctrl = value; break;
+    case ETH_CSUM_CTRL: s->checksum_ctrl = value; break;
     case ETH_TX_DATA:
         if (s->tx_len < sizeof(s->tx_buf)) s->tx_buf[s->tx_len++] = value;
         break;
@@ -139,6 +200,7 @@ static void tricore_eth_reset(DeviceState *dev)
     TriCoreETHState *s = TRICORE_ETH(dev);
     s->control = 0; s->status = 0; s->int_enable = 0; s->int_status = 0;
     s->tx_desc = s->rx_desc = 0; s->tx_len = s->rx_len = s->rx_pos = 0;
+    s->vlan_ctrl = s->checksum_ctrl = 0;
     s->mdio_addr = 1; s->mdio_data = MII_BMSR_LINK_ST | MII_BMSR_AUTONEG;
     memset(s->phy_regs, 0, sizeof(s->phy_regs));
     s->phy_regs[MII_BMCR] = MII_BMCR_AUTOEN | MII_BMCR_FD | MII_BMCR_SPEED100;
@@ -173,6 +235,7 @@ static const VMStateDescription vmstate_tricore_eth = {
         VMSTATE_UINT32(tx_desc, TriCoreETHState), VMSTATE_UINT32(rx_desc, TriCoreETHState),
         VMSTATE_UINT32(mdio_addr, TriCoreETHState), VMSTATE_UINT32(mdio_data, TriCoreETHState),
         VMSTATE_UINT32(mac_low, TriCoreETHState), VMSTATE_UINT32(mac_high, TriCoreETHState),
+        VMSTATE_UINT32(vlan_ctrl, TriCoreETHState), VMSTATE_UINT32(checksum_ctrl, TriCoreETHState),
         VMSTATE_UINT16(tx_len, TriCoreETHState), VMSTATE_UINT16(rx_len, TriCoreETHState),
         VMSTATE_UINT16(rx_pos, TriCoreETHState), VMSTATE_UINT8_ARRAY(tx_buf, TriCoreETHState, 2048),
         VMSTATE_UINT8_ARRAY(rx_buf, TriCoreETHState, 2048), VMSTATE_UINT16_ARRAY(phy_regs, TriCoreETHState, 32),
