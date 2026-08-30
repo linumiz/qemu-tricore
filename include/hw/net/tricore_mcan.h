@@ -10,7 +10,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(TriCoreMCANState, TRICORE_MCAN)
 struct TriCoreMCANState {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
-    qemu_irq irq;
+    qemu_irq irq[16];
     CanBusClientState bus_client;
     CanBusState *canbus;
     uint32_t regs[0x3000 / 4];

@@ -41,8 +41,12 @@ REG32(MO0_AMR, 0x90c)
 
 static void tricore_mcan_update_irq(TriCoreMCANState *s)
 {
-    bool active = (s->regs[R_STATUS / 4] & s->regs[R_INT_ENABLE / 4]) != 0;
-    qemu_set_irq(s->irq, active);
+    uint32_t pending = s->regs[R_STATUS / 4] & s->regs[R_INT_ENABLE / 4];
+    qemu_set_irq(s->irq[0], pending & R_STATUS_RX_PENDING_MASK);
+    qemu_set_irq(s->irq[1], pending & R_STATUS_TX_COMPLETE_MASK);
+    for (unsigned i = 2; i < 16; i++) {
+        qemu_set_irq(s->irq[i], false);
+    }
 }
 
 static bool tricore_mcan_can_receive(CanBusClientState *client)
@@ -197,7 +201,9 @@ static void tricore_mcan_unrealize(DeviceState *dev)
 static void tricore_mcan_init(Object *obj)
 {
     TriCoreMCANState *s = TRICORE_MCAN(obj);
-    sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq);
+    for (unsigned i = 0; i < 16; i++) {
+        sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq[i]);
+    }
     memory_region_init_io(&s->iomem, obj, &tricore_mcan_ops, s,
                           TYPE_TRICORE_MCAN, 0x3000);
     /* Reset value accepts every identifier until firmware programs a mask. */

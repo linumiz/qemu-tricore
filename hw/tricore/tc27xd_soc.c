@@ -368,9 +368,12 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
         qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
                                TC27X_SRC_STM0_SR0));
 
-    /* MultiCAN0 interrupt 0 is the first of the documented CAN SRC nodes. */
-    sysbus_connect_irq(SYS_BUS_DEVICE(s->mcan), 0,
-        qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", TC27X_SRC_MCAN_BASE));
+    /* MultiCAN0 exposes 16 documented SRC nodes at consecutive indices. */
+    for (unsigned i = 0; i < TC27X_SRC_MCAN_COUNT; i++) {
+        sysbus_connect_irq(SYS_BUS_DEVICE(s->mcan), i,
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                   TC27X_SRC_MCAN_BASE + i));
+    }
 
     memory_region_add_subregion_overlap(sysmem, sc->memmap[TC27XD_SFR].base,
                                         &s->sfr->iomem, -1);
