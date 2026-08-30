@@ -133,8 +133,28 @@ static bool asclin_lin_master(TriCoreASCLINState *s)
     return (s->regs[LINCON] & (1u << 26)) != 0;
 }
 
+static bool asclin_lin_pid_valid(uint8_t pid)
+{
+    uint8_t id = pid & 0x3f;
+    unsigned p0 = ((id >> 0) ^ (id >> 1) ^ (id >> 2) ^ (id >> 4)) & 1;
+    unsigned p1 = ((id >> 1) ^ (id >> 3) ^ (id >> 4) ^ (id >> 5)) & 1;
+
+    return ((pid >> 6) & 1) == p0 && ((pid >> 7) & 1) == (p1 ^ 1);
+}
+
 static void asclin_lin_bus_receive(TriCoreASCLINState *s, uint8_t byte)
 {
+    if (byte == 0x55) {
+        s->lin_sync_seen = true;
+        s->lin_pid_seen = false;
+    } else if (s->lin_sync_seen && !s->lin_pid_seen) {
+        s->lin_pid_seen = true;
+        if (!asclin_lin_pid_valid(byte)) {
+            qatomic_or(&s->regs[FLAGS], MASK_FLAGS_CE);
+            asclin_pulse_irq(s, MASK_FLAGS_CE);
+        }
+    }
+
     if (asclin_buffer_free(s) == 0) {
         qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RFO);
         asclin_pulse_irq(s, MASK_FLAGS_RFO);
@@ -580,6 +600,8 @@ static void uart_write(void *opaque, hwaddr offset, uint64_t value,
             qatomic_and(&s->regs[FLAGS],
                         ~(MASK_FLAGS_TH | MASK_FLAGS_TR |
                           MASK_FLAGS_RH | MASK_FLAGS_RR));
+            s->lin_sync_seen = false;
+            s->lin_pid_seen = false;
         }
     }
 }
@@ -649,6 +671,8 @@ static void asclin_uart_reset(DeviceState *d)
         s->regs[i] = 0;
     }
     asclin_buffer_reset(s);
+    s->lin_sync_seen = false;
+    s->lin_pid_seen = false;
 }
 
 static void asclin_uart_update_parameters(TriCoreASCLINState *s)
@@ -747,6 +771,8 @@ static const VMStateDescription vmstate_asclin_uart = {
         VMSTATE_UINT32(rxbufwriteidx, TriCoreASCLINState),
         VMSTATE_UINT32(rxbufreadidx, TriCoreASCLINState),
         VMSTATE_BOOL(block_tx_enabled, TriCoreASCLINState),
+        VMSTATE_BOOL(lin_sync_seen, TriCoreASCLINState),
+        VMSTATE_BOOL(lin_pid_seen, TriCoreASCLINState),
         VMSTATE_END_OF_LIST()
     },
     .post_load = asclin_uart_post_load,
