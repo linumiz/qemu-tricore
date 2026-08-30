@@ -78,6 +78,11 @@ static void test_eray_profiles(void)
     qtest_start("-machine KIT_AURIX_TC397B_TRB");
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C100), ==, 1);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF0017100), ==, 1);
+    /* Both TC3x ERAY instances start with independent channel banks clear. */
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C0F0), ==, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF00170F0), ==, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C110), ==, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0017110), ==, 0);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF00170F0), ==, 0);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF00170F4), ==, 0);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF0017110), ==, 0);
@@ -96,6 +101,27 @@ static void test_eray_profiles(void)
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C128), ==, 0);
     qtest_writel(global_qtest, 0xF001C118, 3);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C100), ==, 0x0d);
+    qtest_writel(global_qtest, 0xF001C134, 4);
+    qtest_writel(global_qtest, 0xF001C138, 5);
+    qtest_writel(global_qtest, 0xF001C13C, 2);
+    qtest_writel(global_qtest, 0xF001C15C, 1);
+    qtest_writel(global_qtest, 0xF001C160, 2);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C134), ==, 4);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C160), ==, 2);
+    qtest_writel(global_qtest, 0xF001C128, 1u << 4);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C104) & (1u << 6), !=, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0038000 + 160 * 4) &
+                     (1u << 24), !=, 0);
+    qtest_writel(global_qtest, 0xF001C104, 1u << 6);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C104) & (1u << 6), ==, 0);
+    /* Repeat the FIFO-empty/status path on ERAY1 and its TC3x SRC row. */
+    qtest_writel(global_qtest, 0xF0017114, 0); /* clear any pending NDAT1 */
+    qtest_writel(global_qtest, 0xF0017128, 1u << 4);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0017104) & (1u << 6), !=, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0038000 + 162 * 4) &
+                     (1u << 24), !=, 0);
+    qtest_writel(global_qtest, 0xF0017104, 1u << 6);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0017104) & (1u << 6), ==, 0);
     qtest_quit(global_qtest);
 
     qtest_start("-machine KIT_A3G_TC4D7_LITE");
