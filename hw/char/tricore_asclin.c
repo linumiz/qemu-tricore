@@ -29,6 +29,8 @@ static GPtrArray *asclin_lin_bus;
 #define ASCLIN_LIN_GATEWAY_BYTE 0xf1
 #define ASCLIN_LIN_GATEWAY_END  0xf2
 #define ASCLIN_LIN_GATEWAY_BREAK 0xf0
+#define ASCLIN_LIN_GATEWAY_RESP_TIMEOUT 0xf3
+#define ASCLIN_LIN_GATEWAY_HEADER_TIMEOUT 0xf4
 
 /*
  * TC3x register offsets are 0x00..0x50, one per 4-byte slot.
@@ -712,6 +714,12 @@ static void uart_rx(void *opaque, const uint8_t *buf, int size)
             uint8_t record = *buf++;
             if (record == ASCLIN_LIN_GATEWAY_BREAK) {
                 asclin_lin_bus_break(s);
+            } else if (record == ASCLIN_LIN_GATEWAY_RESP_TIMEOUT) {
+                qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RT);
+                asclin_pulse_irq(s, MASK_FLAGS_RT);
+            } else if (record == ASCLIN_LIN_GATEWAY_HEADER_TIMEOUT) {
+                qatomic_or(&s->regs[FLAGS], MASK_FLAGS_HT);
+                asclin_pulse_irq(s, MASK_FLAGS_HT);
             }
             s->lin_gateway_rx_type = (record == ASCLIN_LIN_GATEWAY_BYTE) ?
                                      ASCLIN_LIN_GATEWAY_BYTE : 0;
