@@ -118,6 +118,16 @@ static void can_bus_event_cb(void *opaque)
         }
     }
     unsigned index = (bus->event_head + selected) % ARRAY_SIZE(bus->events);
+    uint64_t arbitration_deadline = bus->events[index].deadline;
+    for (unsigned i = 0; i < bus->event_count; i++) {
+        unsigned loser = (bus->event_head + i) % ARRAY_SIZE(bus->events);
+        if (i != selected && bus->events[loser].deadline == arbitration_deadline &&
+            bus->events[loser].sender->bit_info &&
+            bus->events[loser].sender->bit_info->arbitration_lost) {
+            bus->events[loser].sender->bit_info->arbitration_lost(
+                bus->events[loser].sender);
+        }
+    }
     can_bus_dispatch(bus, bus->events[index].sender, &bus->events[index].frame, 1);
     for (unsigned i = selected; i + 1 < bus->event_count; i++) {
         unsigned dst = (bus->event_head + i) % ARRAY_SIZE(bus->events);
