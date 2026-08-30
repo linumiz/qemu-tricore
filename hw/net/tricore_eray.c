@@ -85,7 +85,8 @@
 #define ERAY_CCEV_MASK  0x000000ffu
 #define ERAY_CMD_MASK   0x000000ffu
 #define ERAY_CYCLE_MASK 0x0000003fu
-#define ERAY_SLOTSTAT_MASK 0xc07fffffu
+#define ERAY_SLOTSTAT_MASK 0xe07fffffu
+#define SLOTSTAT_FILTER_REJECT BIT(29)
 #define ERAY_MBCTRL_MASK (MBCTRL_COMMIT | MBCTRL_UNLOCK | \
                           MBCTRL_CHANNEL_B | MBCTRL_FIFO_POP)
 #define ERAY_GTU_MASK   0x0000ffffu
@@ -157,7 +158,7 @@ static void eray_scheduler_cb(void *opaque)
             s->minislot_counter = 0;
         }
         s->cycle = (s->cycle + 1) % MAX(1, s->cycle_length);
-        s->slot_status = (s->slot_status & 0x80000000) |
+        s->slot_status = (s->slot_status & (BIT(31) | SLOTSTAT_FILTER_REJECT)) |
                          (s->cycle << 16) | (s->slot_counter & 0x7ff);
         if (s->slot_counter >= s->static_slots) {
             /* The dynamic action point is a deterministic phase offset in
@@ -373,9 +374,13 @@ static void eray_deliver_frame(TriCoreERAYState *s, uint32_t frame_id,
             continue;
         }
         if (peer->slot_filter && peer->slot_filter != (frame_id & 0x7ff)) {
+            peer->slot_status |= SLOTSTAT_FILTER_REJECT;
+            eray_update_irq(peer);
             continue;
         }
         if (peer->cycle_filter && peer->cycle_filter != (s->cycle & 0x3f)) {
+            peer->slot_status |= SLOTSTAT_FILTER_REJECT;
+            eray_update_irq(peer);
             continue;
         }
         if (peer->last_rx_id == (frame_id & 0x7ff) &&
