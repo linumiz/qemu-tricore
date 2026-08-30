@@ -15,13 +15,17 @@
 #define DMA_CTL_IRQ BIT(1)
 #define DMA_STAT_DONE BIT(0)
 #define DMA_STAT_ERROR BIT(1)
+#define DMA_STAT_DESC_ERROR BIT(2)
+#define DMA_STAT_EOL BIT(3)
+#define DMA_CTL_CHAIN BIT(2)
 
 static uint64_t dma_read(void *opaque, hwaddr off, unsigned size)
 {
     TriCoreDMAState *s = opaque;
     switch (off) { case DMA_SRC: return s->src; case DMA_DST: return s->dst;
     case DMA_LEN: return s->length; case DMA_CTL: return s->control;
-    case DMA_STAT: return s->status; default: return 0; }
+    case DMA_STAT: return s->status; case 0x14: return s->descriptor;
+    default: return 0; }
 }
 
 static void dma_write(void *opaque, hwaddr off, uint64_t value, unsigned size)
@@ -31,17 +35,42 @@ static void dma_write(void *opaque, hwaddr off, uint64_t value, unsigned size)
     case DMA_SRC: s->src = value; break;
     case DMA_DST: s->dst = value; break;
     case DMA_LEN: s->length = value; break;
-    case DMA_STAT: s->status &= ~(value & (DMA_STAT_DONE | DMA_STAT_ERROR)); break;
+    case DMA_STAT: s->status &= ~(value & (DMA_STAT_DONE | DMA_STAT_ERROR |
+                                             DMA_STAT_DESC_ERROR | DMA_STAT_EOL)); break;
+    case 0x14: s->descriptor = value; break;
     case DMA_CTL:
-        s->control = value & (DMA_CTL_START | DMA_CTL_IRQ);
+        s->control = value & (DMA_CTL_START | DMA_CTL_IRQ | DMA_CTL_CHAIN);
         if (value & DMA_CTL_START) {
-            uint8_t *buf = g_malloc(s->length);
-            MemTxResult r = address_space_read(&address_space_memory, s->src,
-                                               MEMTXATTRS_UNSPECIFIED, buf, s->length);
-            if (r == MEMTX_OK) r = address_space_write(&address_space_memory, s->dst,
-                                                       MEMTXATTRS_UNSPECIFIED, buf, s->length);
-            g_free(buf);
-            s->status = (r == MEMTX_OK) ? DMA_STAT_DONE : DMA_STAT_ERROR;
+            MemTxResult r = MEMTX_OK;
+            unsigned count = 0;
+            do {
+                uint32_t src = s->src, dst = s->dst, len = s->length, next = 0;
+                if ((value & DMA_CTL_CHAIN) && s->descriptor) {
+                    uint32_t d[4];
+                    r = address_space_read(&address_space_memory, s->descriptor,
+                                           MEMTXATTRS_UNSPECIFIED, d, sizeof(d));
+                    if (r != MEMTX_OK || !d[2] || d[2] > 16 * 1024 * 1024) {
+                        s->status = DMA_STAT_DESC_ERROR;
+                        break;
+                    }
+                    src = le32_to_cpu(d[0]); dst = le32_to_cpu(d[1]);
+                    len = le32_to_cpu(d[2]); next = le32_to_cpu(d[3]);
+                }
+                uint8_t *buf = g_malloc(len);
+                r = address_space_read(&address_space_memory, src,
+                                       MEMTXATTRS_UNSPECIFIED, buf, len);
+                if (r == MEMTX_OK) r = address_space_write(&address_space_memory, dst,
+                                                           MEMTXATTRS_UNSPECIFIED, buf, len);
+                g_free(buf);
+                if (r != MEMTX_OK) break;
+                if (!(value & DMA_CTL_CHAIN) || !next) {
+                    s->status = DMA_STAT_DONE | ((value & DMA_CTL_CHAIN) ? DMA_STAT_EOL : 0);
+                    break;
+                }
+                s->descriptor = next;
+            } while (++count < 256);
+            if (count == 256) s->status = DMA_STAT_DESC_ERROR;
+            if (r != MEMTX_OK && !(s->status & DMA_STAT_DESC_ERROR)) s->status = DMA_STAT_ERROR;
             if ((value & DMA_CTL_IRQ) && r == MEMTX_OK) {
                 qemu_set_irq(s->irq, 1);
                 qemu_set_irq(s->irq, 0);

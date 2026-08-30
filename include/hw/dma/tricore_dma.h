@@ -10,7 +10,7 @@ struct TriCoreDMAState {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
     qemu_irq irq;
-    uint32_t src, dst, length, control, status;
+    uint32_t src, dst, length, control, status, descriptor;
 };
 
 #endif
