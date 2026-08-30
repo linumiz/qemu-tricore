@@ -189,6 +189,23 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, 0xF9400000);
     sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0,
                        qdev_get_gpio_in_named(DEVICE(&s->ir), "irq", 710));
+
+    /* TC4Dx provides two ERAY instances at the public IfxEray base addresses. */
+    static const hwaddr eray_base[2] = { 0xF441C000, 0xF441D000 };
+    for (i = 0; i < 2; i++) {
+        dev = DEVICE(&s->eray[i]);
+        if (!sysbus_realize(SYS_BUS_DEVICE(dev), errp)) {
+            return;
+        }
+        sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, eray_base[i]);
+        sysbus_mmio_map(SYS_BUS_DEVICE(dev), 1, eray_base[i] + 0x1000);
+        sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0,
+                           qdev_get_gpio_in_named(DEVICE(&s->ir), "irq",
+                                                  720 + i * 2));
+        sysbus_connect_irq(SYS_BUS_DEVICE(dev), 1,
+                           qdev_get_gpio_in_named(DEVICE(&s->ir), "irq",
+                                                  721 + i * 2));
+    }
 }
 
 static void tc4dx_soc_init(Object *obj)
@@ -214,6 +231,11 @@ static void tc4dx_soc_init(Object *obj)
     }
     object_initialize_child(obj, "eth", &s->eth, TYPE_TRICORE_GETH);
     object_initialize_child(obj, "leth", &s->leth, TYPE_TRICORE_LETH);
+    for (unsigned i = 0; i < 2; i++) {
+        char *name = g_strdup_printf("eray%u", i);
+        object_initialize_child(obj, name, &s->eray[i], TYPE_TRICORE_ERAY);
+        g_free(name);
+    }
 
     s->fosc = qdev_init_clock_in(DEVICE(s), "fosc", NULL, NULL, 0);
 }

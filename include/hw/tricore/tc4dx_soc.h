@@ -21,6 +21,7 @@
 #include "hw/timer/tricore_stm.h"
 #include "hw/char/tricore_asclin.h"
 #include "hw/net/tricore_mcan.h"
+#include "hw/net/tricore_eray.h"
 #include "hw/net/tricore_eth.h"
 #include "hw/tricore/tc_soc.h"
 
@@ -43,6 +44,7 @@ typedef struct TC4DXSoCState {
     TriCoreMCANState mcan[TC4DX_MAX_MCAN];
     TriCoreETHState eth;
     TriCoreETHState leth;
+    TriCoreERAYState eray[2];
     CanBusState *canbus;
     MemoryRegion cre_region;
     uint32_t cre_control;
