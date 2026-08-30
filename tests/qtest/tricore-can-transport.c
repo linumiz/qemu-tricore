@@ -38,6 +38,10 @@ static void test_eray_profiles(void)
     /* ERAY0 INT0 is routed to the documented TC27x SRC slot 160. */
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF0038000 + 160 * 4), !=, 0);
     qtest_writel(global_qtest, 0xF001C104, 1); /* CCEV W1C */
+    qtest_writel(global_qtest, 0xF001E000, 1);
+    qtest_writel(global_qtest, 0xF001C128, 1); /* commit without unlock */
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C104) & 0x80, ==, 0x80);
+    qtest_writel(global_qtest, 0xF001C104, 0x80);
     qtest_writel(global_qtest, 0xF001C118, 3); /* cold-start */
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C100), ==, 0x0d);
     qtest_writel(global_qtest, 0xF001C118, 5); /* halt */
@@ -66,7 +70,8 @@ static void test_eray_profiles(void)
      * the second in-process node through NDAT/MBSC pending state. */
     qtest_writel(global_qtest, 0xF441E000, 0x123);
     qtest_writel(global_qtest, 0xF441C124, 0);
-    qtest_writel(global_qtest, 0xF441C128, 1);
+    qtest_writel(global_qtest, 0xF441C128, 2); /* unlock */
+    qtest_writel(global_qtest, 0xF441C128, 1); /* commit */
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D12C), ==, 1);
     /* Exercise the public FIFO configuration fields for a dynamic frame. */
     qtest_writel(global_qtest, 0xF441D138, 0);   /* dynamic start */
@@ -74,7 +79,8 @@ static void test_eray_profiles(void)
     qtest_writel(global_qtest, 0xF441D160, 2);   /* FIFO depth */
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D160), ==, 2);
     qtest_writel(global_qtest, 0xF441E000, 100);
-    qtest_writel(global_qtest, 0xF441C128, 1);
+    qtest_writel(global_qtest, 0xF441C128, 2); /* unlock */
+    qtest_writel(global_qtest, 0xF441C128, 1); /* commit */
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D160), ==, 2);
     /* Scheduled commit is held until the next virtual macrocycle tick. */
     qtest_writel(global_qtest, 0xF441D114, 0xffffffff);
@@ -82,7 +88,8 @@ static void test_eray_profiles(void)
     qtest_writel(global_qtest, 0xF441D0f0, 0xffffffff);
     qtest_writel(global_qtest, 0xF441C130, 1);
     qtest_writel(global_qtest, 0xF441E000, 101);
-    qtest_writel(global_qtest, 0xF441C128, 1);
+    qtest_writel(global_qtest, 0xF441C128, 2); /* unlock */
+    qtest_writel(global_qtest, 0xF441C128, 1); /* commit */
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D12c), ==, 0);
     qtest_clock_step(global_qtest, 1000);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D12c), !=, 0);

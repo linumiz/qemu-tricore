@@ -163,6 +163,14 @@ static void eray_commit_message(TriCoreERAYState *s)
 {
     uint32_t offset = (s->mbid & 0xff) * 64;
     uint32_t frame_id = ldl_le_p(&s->msg_data[offset]);
+    if (s->unlock_key != 0xa5) {
+        /* The public message-handler sequence requires an unlock write before
+         * a commit; expose legacy/direct commits as a protocol error. */
+        s->ccev |= BIT(7);
+        return;
+    }
+    s->unlock_key = 0;
+    s->host_busy = 1;
     uint32_t payload_len = ldl_le_p(&s->msg_data[offset + 4]) & 0x7f;
     if (!payload_len || payload_len > 64) {
         payload_len = 64;
