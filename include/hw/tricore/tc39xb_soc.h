@@ -35,6 +35,7 @@
 #include "hw/net/tricore_mcan.h"
 #include "hw/net/tricore_eth.h"
 #include "hw/net/tricore_eray.h"
+#include "hw/dma/tricore_dma.h"
 #include "hw/tricore/tc_soc.h"
 
 #define TYPE_TC39XB_SOC ("tc39xb-soc")
@@ -121,6 +122,7 @@ typedef struct TC39XBSoCState {
     TriCoreMCANState *mcan[3];
     TriCoreETHState *eth;
     TriCoreERAYState *eray[2];
+    TriCoreDMAState *dma;
     CanBusState *canbus;
 
     qemu_irq irq[256];

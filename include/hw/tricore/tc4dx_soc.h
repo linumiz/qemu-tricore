@@ -22,6 +22,7 @@
 #include "hw/char/tricore_asclin.h"
 #include "hw/net/tricore_mcan.h"
 #include "hw/net/tricore_eray.h"
+#include "hw/dma/tricore_dma.h"
 #include "hw/net/tricore_eth.h"
 #include "hw/tricore/tc_soc.h"
 
@@ -45,6 +46,7 @@ typedef struct TC4DXSoCState {
     TriCoreETHState eth;
     TriCoreETHState leth;
     TriCoreERAYState eray[2];
+    TriCoreDMAState dma;
     CanBusState *canbus;
     MemoryRegion cre_region;
     uint32_t cre_control;

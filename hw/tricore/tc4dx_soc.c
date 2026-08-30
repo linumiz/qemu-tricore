@@ -223,6 +223,11 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
                            qdev_get_gpio_in_named(DEVICE(&s->ir), "irq",
                                                   tc4dx_eray_src[i][1]));
     }
+    dev = DEVICE(&s->dma);
+    if (!sysbus_realize(SYS_BUS_DEVICE(dev), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, 0xF0000000);
 }
 
 static void tc4dx_soc_init(Object *obj)

@@ -340,6 +340,8 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->mcan), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->eth), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->eray), &error_fatal);
+    s->dma = TRICORE_DMA(object_new(TYPE_TRICORE_DMA));
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->dma), &error_fatal);
     for (unsigned i = 0; i < 3; i++) {
         DeviceState *extra = DEVICE(s->asclin_extra[i]);
         qdev_prop_set_chr(extra, "chardev", serial_hd(i + 1));
@@ -348,6 +350,7 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
 
     sysbus_mmio_map(SYS_BUS_DEVICE(s->irbus), 0, 0xF0037000);
     sysbus_mmio_map(SYS_BUS_DEVICE(s->irbus), 1, 0xF0038000);
+    sysbus_mmio_map(SYS_BUS_DEVICE(s->dma), 0, 0xF0010000);
 
     for (unsigned i = 0; i < sc->num_cpus; i++) {
         qdev_connect_gpio_out_named(DEVICE(s->irbus), "isp", i,

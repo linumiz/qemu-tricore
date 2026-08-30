@@ -423,6 +423,8 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     for (unsigned i = 0; i < 2; i++) {
         sysbus_realize_and_unref(SYS_BUS_DEVICE(s->eray[i]), &error_fatal);
     }
+    s->dma = TRICORE_DMA(object_new(TYPE_TRICORE_DMA));
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->dma), &error_fatal);
     for (unsigned i = 0; i < 11; i++) {
         DeviceState *extra = DEVICE(s->asclin_extra[i]);
         qdev_prop_set_chr(extra, "chardev", serial_hd(i + 1));
@@ -501,6 +503,7 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
                                        176 + i * 16 + irq));
         }
     }
+    sysbus_mmio_map(SYS_BUS_DEVICE(s->dma), 0, 0xF0010000);
     memory_region_add_subregion(sysmem, 0xF001D000, &s->eth->iomem);
     sysbus_connect_irq(SYS_BUS_DEVICE(s->eth), 0,
         qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", 175));
