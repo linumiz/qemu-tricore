@@ -52,6 +52,12 @@ static void test_eray_profiles(void)
     qtest_start("-machine KIT_AURIX_TC397B_TRB");
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C100), ==, 1);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF0017100), ==, 1);
+    /* Trigger both ERAY error sources and verify the TC3x SRC rows carry the
+     * pending request through the interrupt router. */
+    qtest_writel(global_qtest, 0xF001C118, 5);
+    qtest_writel(global_qtest, 0xF0017118, 5);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0038000 + 160 * 4), !=, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0038000 + 162 * 4), !=, 0);
     qtest_writel(global_qtest, 0xF0017180, 10);
     qtest_writel(global_qtest, 0xF0017184, 20);
     qtest_writel(global_qtest, 0xF0017188, 32);
