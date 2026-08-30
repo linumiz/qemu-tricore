@@ -84,3 +84,4 @@ specific_ss.add(when: ['CONFIG_KVM', 'CONFIG_LOONGARCH_EXTIOI'],
 specific_ss.add(when: 'CONFIG_LOONGARCH_DINTC', if_true: files('loongarch_dintc.c'))
 specific_ss.add(when: 'CONFIG_LOONGARCH_EXTIOI', if_true: files('loongarch_extioi.c'))
 specific_ss.add(when: 'CONFIG_TRICORE_IRBUS', if_true: files('tricore_ir.c'))
+system_ss.add(files('tricore_ici.c'))
