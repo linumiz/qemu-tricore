@@ -354,6 +354,9 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(s->irbus), 1, 0xF0038000);
     sysbus_mmio_map(SYS_BUS_DEVICE(s->dma), 0, 0xF0010000);
     sysbus_mmio_map(SYS_BUS_DEVICE(s->port), 0, 0xF003A000);
+    s->ici = TRICORE_ICI(object_new(TYPE_TRICORE_ICI));
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->ici), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(s->ici), 0, 0xF003B000);
 
     for (unsigned i = 0; i < sc->num_cpus; i++) {
         qdev_connect_gpio_out_named(DEVICE(s->irbus), "isp", i,
