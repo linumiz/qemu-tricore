@@ -301,6 +301,11 @@ static void tc39x_soc_init_memory_mapping(DeviceState *dev_soc)
 #define TC3X_SRC_ASCLIN0_TX     0x14
 #define TC3X_SRC_ASCLIN0_RX     0x15
 #define TC3X_SRC_ASCLIN0_ERR    0x16
+/* Public TC3x ERAY0/ERAY1 service-request slots. */
+#define TC3X_SRC_ERAY0_INT0     160
+#define TC3X_SRC_ERAY0_INT1     161
+#define TC3X_SRC_ERAY1_INT0     162
+#define TC3X_SRC_ERAY1_INT1     163
 
 static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
 {
@@ -496,9 +501,11 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
         memory_region_add_subregion(sysmem, base + 0x1000,
                                     &s->eray[i]->msg_ram);
         sysbus_connect_irq(SYS_BUS_DEVICE(s->eray[i]), 0,
-            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", 160 + i * 2));
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                   (i ? TC3X_SRC_ERAY1_INT0 : TC3X_SRC_ERAY0_INT0)));
         sysbus_connect_irq(SYS_BUS_DEVICE(s->eray[i]), 1,
-            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", 161 + i * 2));
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                   (i ? TC3X_SRC_ERAY1_INT1 : TC3X_SRC_ERAY0_INT1)));
     }
     for (unsigned i = 0; i < 11; i++) {
         memory_region_add_subregion(sysmem,

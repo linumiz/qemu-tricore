@@ -21,6 +21,12 @@
 #include "hw/tricore/triboard.h"
 #include "qom/object.h"
 
+/* Public TC4Dx SRC service-request slots for ERAY0 and ERAY1. */
+#define TC4DX_SRC_ERAY0_INT0 720
+#define TC4DX_SRC_ERAY0_INT1 721
+#define TC4DX_SRC_ERAY1_INT0 722
+#define TC4DX_SRC_ERAY1_INT1 723
+
 static uint64_t tc4dx_cre_read(void *opaque, hwaddr offset, unsigned size)
 {
     TC4DXSoCState *s = opaque;
@@ -202,10 +208,10 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
         sysbus_mmio_map(SYS_BUS_DEVICE(dev), 1, eray_base[i] + 0x2000);
         sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0,
                            qdev_get_gpio_in_named(DEVICE(&s->ir), "irq",
-                                                  720 + i * 2));
+                                                  (i ? TC4DX_SRC_ERAY1_INT0 : TC4DX_SRC_ERAY0_INT0)));
         sysbus_connect_irq(SYS_BUS_DEVICE(dev), 1,
                            qdev_get_gpio_in_named(DEVICE(&s->ir), "irq",
-                                                  721 + i * 2));
+                                                  (i ? TC4DX_SRC_ERAY1_INT1 : TC4DX_SRC_ERAY0_INT1)));
     }
 }
 
