@@ -18,13 +18,35 @@
 #include "qapi/error.h"
 #include "qemu/log.h"
 
-#define UPDATE_DIV_CLK(_clk, _freq, _field_reg, _field_name) clock_update(s->_clk, FIELD_EX32(s->_field_reg, _field_reg, _field_name)*_freq)
+/*
+ * TC4x CCU divider fields are encoded indices, not arithmetic divisors.
+ * This is the same lookup table used by the TC4x iLLD (IfxClock): for
+ * example, STMDIV=3 means divide by 3 and STMDIV=8 means divide by 8.
+ */
+static uint32_t tc4x_clock_divisor(uint32_t encoded)
+{
+    static const uint8_t dividers[16] = {
+        1, 1, 2, 3, 4, 5, 6, 6,
+        8, 8, 10, 10, 12, 12, 12, 15,
+    };
+
+    return dividers[encoded & 0xf];
+}
+
+#define UPDATE_DIV_CLK(_clk, _freq, _field_reg, _field_name) \
+    clock_update(s->_clk, (_freq) / tc4x_clock_divisor( \
+        FIELD_EX32(s->_field_reg, _field_reg, _field_name)))
 
 static void tc4x_clock_update_sysccu(TC4xClockState *s)
 {
     UPDATE_DIV_CLK(fspb, clock_get(s->fsource0), SYSCCUCON0, SPBDIV);
     UPDATE_DIV_CLK(fsri, clock_get(s->fsource0), SYSCCUCON0, SRIDIV);
-    UPDATE_DIV_CLK(fstm, clock_get(s->fsource0), SYSCCUCON0, STMDIV);
+    if (FIELD_EX32(s->SYSCCUCON0, SYSCCUCON0, LPDIV) != 0) {
+        /* In low-power mode the STM clock is fixed to fSYS / 120. */
+        clock_update(s->fstm, clock_get(s->fsource0) / 120);
+    } else {
+        UPDATE_DIV_CLK(fstm, clock_get(s->fsource0), SYSCCUCON0, STMDIV);
+    }
     UPDATE_DIV_CLK(fsrics, clock_get(s->fsource0), SYSCCUCON0, SRICSDIV);
     UPDATE_DIV_CLK(fgeth, clock_get(s->fsource0), SYSCCUCON1, GETHDIV);
     UPDATE_DIV_CLK(fegtm, clock_get(s->fsource0), SYSCCUCON1, EGTMDIV);
