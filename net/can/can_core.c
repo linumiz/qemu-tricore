@@ -224,6 +224,40 @@ bool can_bus_wired_and(const bool *drives, size_t drive_count)
     return level;
 }
 
+ssize_t can_bus_arbitrate_bits(const uint8_t *streams, size_t sender_count,
+                               size_t stream_stride, size_t bit_count)
+{
+    if (!streams || !sender_count || !stream_stride || !bit_count) {
+        return -1;
+    }
+    bool active[16];
+    if (sender_count > ARRAY_SIZE(active)) {
+        return -1;
+    }
+    memset(active, true, sizeof(active));
+    size_t remaining = sender_count;
+    for (size_t bit = 0; bit < bit_count && remaining > 1; bit++) {
+        bool drives[16];
+        for (size_t sender = 0; sender < sender_count; sender++) {
+            drives[sender] = !active[sender] ||
+                ((streams[sender * stream_stride + bit / 8] >> (bit % 8)) & 1);
+        }
+        bool bus_level = can_bus_wired_and(drives, sender_count);
+        for (size_t sender = 0; sender < sender_count; sender++) {
+            if (active[sender] && drives[sender] && !bus_level) {
+                active[sender] = false;
+                remaining--;
+            }
+        }
+    }
+    for (size_t sender = 0; sender < sender_count; sender++) {
+        if (active[sender]) {
+            return sender;
+        }
+    }
+    return -1;
+}
+
 int can_bus_filter_match(struct qemu_can_filter *filter, qemu_canid_t can_id)
 {
     int m;
