@@ -228,6 +228,11 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
         return;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, 0xF0000000);
+    dev = DEVICE(&s->port);
+    if (!sysbus_realize(SYS_BUS_DEVICE(dev), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, 0xF000A000);
 }
 
 static void tc4dx_soc_init(Object *obj)

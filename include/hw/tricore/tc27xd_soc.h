@@ -36,6 +36,7 @@
 #include "hw/net/tricore_eth.h"
 #include "hw/net/tricore_eray.h"
 #include "hw/dma/tricore_dma.h"
+#include "hw/gpio/tricore_port.h"
 #include "hw/tricore/tc_soc.h"
 
 #define TYPE_TC27XD_SOC ("tc27xd-soc")
@@ -104,6 +105,7 @@ typedef struct TC27XDSoCState {
     TriCoreETHState *eth;
     TriCoreERAYState *eray;
     TriCoreDMAState *dma;
+    TriCorePortState *port;
     CanBusState *canbus;
     TriCoreSFRState *sfr;
 

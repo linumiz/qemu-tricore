@@ -23,6 +23,7 @@
 #include "hw/net/tricore_mcan.h"
 #include "hw/net/tricore_eray.h"
 #include "hw/dma/tricore_dma.h"
+#include "hw/gpio/tricore_port.h"
 #include "hw/net/tricore_eth.h"
 #include "hw/tricore/tc_soc.h"
 
@@ -47,6 +48,7 @@ typedef struct TC4DXSoCState {
     TriCoreETHState leth;
     TriCoreERAYState eray[2];
     TriCoreDMAState dma;
+    TriCorePortState port;
     CanBusState *canbus;
     MemoryRegion cre_region;
     uint32_t cre_control;
