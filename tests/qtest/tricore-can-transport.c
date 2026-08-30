@@ -35,6 +35,8 @@ static void test_eray_profiles(void)
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C100), ==, 1);
     qtest_writel(global_qtest, 0xF001C118, 5); /* HALT is invalid in CONFIG */
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C104) & 1, ==, 1);
+    /* ERAY0 INT0 is routed to the documented TC27x SRC slot 160. */
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0038000 + 160 * 4), !=, 0);
     qtest_writel(global_qtest, 0xF001C104, 1); /* CCEV W1C */
     qtest_writel(global_qtest, 0xF001C118, 3); /* cold-start */
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C100), ==, 0x0d);

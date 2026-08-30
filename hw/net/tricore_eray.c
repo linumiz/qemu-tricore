@@ -55,6 +55,12 @@
 #define ERAY_ACTION_STATIC 0x18c
 #define ERAY_ACTION_DYNAMIC 0x190
 
+/* Public register field masks (reserved bits read as zero and ignore writes). */
+#define ERAY_SUCC1_MASK 0x03ffffffu
+#define ERAY_SUCC2_MASK 0x03ffffffu
+#define ERAY_SUCC3_MASK 0x03ffffffu
+#define ERAY_PRTC_MASK  0x0fffffffu
+
 #define CCSV_POC_SHIFT 0
 #define CCSV_POC_MASK  0x3f
 #define POC_CONFIG     0x01
@@ -320,14 +326,14 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
     TriCoreERAYState *s = opaque;
     switch (off) {
     case ERAY_CCEV: s->ccev &= ~value; break; /* documented W1C status */
-    case ERAY_SUCC1: s->succ1 = value; break;
-    case ERAY_NEMC: s->nemc = value; break;
+    case ERAY_SUCC1: s->succ1 = value & ERAY_SUCC1_MASK; break;
+    case ERAY_NEMC: s->nemc = value & 0x00ffffffu; break;
     case ERAY_MBSC1: s->mbsc1 &= ~value; break;
     case ERAY_NDAT1: s->ndat1 &= ~value; break;
     case ERAY_MBSC0: s->mbsc0 &= ~value; break;
     case ERAY_NDAT0: s->ndat0 &= ~value; break;
     case ERAY_CMD: eray_command(s, value); break;
-    case ERAY_CYCLE: s->cycle = value & 0xff; break;
+    case ERAY_CYCLE: s->cycle = value % MAX(1u, s->cycle_length); break;
     case ERAY_SLOTSTAT: s->slot_status = value; break;
     case ERAY_MBID: s->mbid = value & 0xff; break;
     case ERAY_MBCTRL:
@@ -361,10 +367,10 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
             s->sched_period_ns = ERAY_CYCLE_NS;
         }
         break;
-    case ERAY_SUCC2: s->succ2 = value; break;
-    case ERAY_SUCC3: s->succ3 = value; break;
-    case ERAY_PRTC1: s->prtc1 = value; break;
-    case ERAY_PRTC2: s->prtc2 = value; break;
+    case ERAY_SUCC2: s->succ2 = value & ERAY_SUCC2_MASK; break;
+    case ERAY_SUCC3: s->succ3 = value & ERAY_SUCC3_MASK; break;
+    case ERAY_PRTC1: s->prtc1 = value & ERAY_PRTC_MASK; break;
+    case ERAY_PRTC2: s->prtc2 = value & ERAY_PRTC_MASK; break;
     case ERAY_MRC: s->fifo_start = value & 0xff; break;
     case ERAY_FCL: s->fifo_depth = value & 0xff; break;
     case ERAY_FSR: s->fifo_status &= ~value; break; /* status W1C */
@@ -373,9 +379,20 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
     case ERAY_FSR_CRIT: s->fifo_critical = value & 0xff; break;
     case ERAY_IRQ0_MASK: s->irq0_mask = value & 0xffff; break;
     case ERAY_IRQ1_MASK: s->irq1_mask = value; break;
-    case ERAY_GTU_MICROTICKS: s->gtu_microticks = value & 0xffff; break;
-    case ERAY_GTU_MACROTICKS: s->gtu_macroticks = value & 0xffff; break;
-    case ERAY_GTU_CYCLE: s->cycle_length = value & 0x3f; break;
+    case ERAY_GTU_MICROTICKS:
+        s->gtu_microticks = value & 0xffff;
+        s->sched_period_ns = MAX(1u, s->gtu_microticks) *
+                             MAX(1u, s->gtu_macroticks) * 1000;
+        break;
+    case ERAY_GTU_MACROTICKS:
+        s->gtu_macroticks = value & 0xffff;
+        s->sched_period_ns = MAX(1u, s->gtu_microticks) *
+                             MAX(1u, s->gtu_macroticks) * 1000;
+        break;
+    case ERAY_GTU_CYCLE:
+        s->cycle_length = MIN(64u, MAX(1u, value & 0x3f));
+        s->cycle %= s->cycle_length;
+        break;
     case ERAY_ACTION_STATIC: s->action_point_static = value & 0xffff; break;
     case ERAY_ACTION_DYNAMIC: s->action_point_dynamic = value & 0xffff; break;
     case ERAY_FILTER_ID: s->slot_filter = value & 0x7ff; break;
