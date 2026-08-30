@@ -128,7 +128,9 @@ static bool eray_dynamic_collision(TriCoreERAYState *s, uint32_t frame_id,
      * bus.  If two nodes request the same cycle/minislot, the lower public
      * frame ID wins and the loser gets a slot-error event. */
     QTAILQ_FOREACH(peer, &eray_bus, bus_node) {
-        if (peer == s || !peer->tx_pending ||
+        /* Only active FlexRay nodes participate in dynamic arbitration;
+         * a stopped migration destination must not collide with the source. */
+        if (peer == s || peer->ccsv != POC_NORMAL_ACTIVE || !peer->tx_pending ||
             peer->tx_due_cycle != due_cycle || peer->tx_due_slot != due_slot) {
             continue;
         }
