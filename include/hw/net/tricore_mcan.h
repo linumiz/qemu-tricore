@@ -21,6 +21,8 @@ struct TriCoreMCANState {
     uint8_t rx_fifo_head, rx_fifo_tail, rx_fifo_count;
     uint8_t tx_data[64], rx_data[64];
     uint8_t tx_len, rx_len;
+    bool bit_sample_level;
+    uint64_t bit_sample_time;
 };
 
 #endif

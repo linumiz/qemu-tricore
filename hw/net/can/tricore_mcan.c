@@ -140,6 +140,18 @@ static CanBusClientInfo tricore_mcan_bus_info = {
     .receive = tricore_mcan_receive,
 };
 
+static void tricore_mcan_sample(CanBusClientState *client,
+                                const CanBusBitSample *sample)
+{
+    TriCoreMCANState *s = container_of(client, TriCoreMCANState, bus_client);
+    s->bit_sample_level = sample->level;
+    s->bit_sample_time = sample->timestamp_ns;
+}
+
+static CanBusBitClientInfo tricore_mcan_bit_info = {
+    .sample = tricore_mcan_sample,
+};
+
 static void tricore_mcan_send(TriCoreMCANState *s)
 {
     qemu_can_frame frame = { 0 };
@@ -273,6 +285,7 @@ static void tricore_mcan_realize(DeviceState *dev, Error **errp)
 {
     TriCoreMCANState *s = TRICORE_MCAN(dev);
     s->bus_client.info = &tricore_mcan_bus_info;
+    s->bus_client.bit_info = &tricore_mcan_bit_info;
     if (s->canbus && can_bus_insert_client(s->canbus, &s->bus_client) < 0) {
         error_setg(errp, "unable to attach MultiCAN node to CAN bus");
     }
@@ -325,6 +338,8 @@ static const VMStateDescription vmstate_tricore_mcan = {
         VMSTATE_UINT8_ARRAY(rx_data, TriCoreMCANState, 64),
         VMSTATE_UINT8(tx_len, TriCoreMCANState),
         VMSTATE_UINT8(rx_len, TriCoreMCANState),
+        VMSTATE_BOOL(bit_sample_level, TriCoreMCANState),
+        VMSTATE_UINT64(bit_sample_time, TriCoreMCANState),
         VMSTATE_END_OF_LIST()
     },
 };
