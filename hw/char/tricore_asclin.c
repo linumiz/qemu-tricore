@@ -168,10 +168,10 @@ static void asclin_lin_gateway_end(TriCoreASCLINState *s)
 
 static void asclin_lin_bus_break(TriCoreASCLINState *s)
 {
-    if (asclin_buffer_free(s) != 0) {
-        s->lin_sync_seen = false;
-        s->lin_pid_seen = false;
-    }
+    s->lin_sync_seen = false;
+    s->lin_pid_seen = false;
+    s->lin_data_count = 0;
+    s->lin_checksum_sum = 0;
     qatomic_or(&s->regs[FLAGS], MASK_FLAGS_LIN_BREAK);
     asclin_pulse_irq(s, MASK_FLAGS_LIN_BREAK);
 }
@@ -183,10 +183,25 @@ static void asclin_lin_bus_receive(TriCoreASCLINState *s, uint8_t byte)
         s->lin_pid_seen = false;
     } else if (s->lin_sync_seen && !s->lin_pid_seen) {
         s->lin_pid_seen = true;
+        s->lin_data_count = 0;
+        s->lin_checksum_sum = (s->regs[LINCON] & (1u << 25)) ? byte : 0;
         if (!asclin_lin_pid_valid(byte)) {
             qatomic_or(&s->regs[FLAGS], MASK_FLAGS_CE);
             asclin_pulse_irq(s, MASK_FLAGS_CE);
         }
+    }
+
+    if ((s->regs[LINCON] & (1u << 25)) && s->lin_pid_seen &&
+        s->lin_data_count >= 8) {
+        if (byte != (uint8_t)~s->lin_checksum_sum) {
+            qatomic_or(&s->regs[FLAGS], MASK_FLAGS_LC);
+            asclin_pulse_irq(s, MASK_FLAGS_LC);
+        }
+        s->lin_sync_seen = false;
+        s->lin_pid_seen = false;
+        s->lin_data_count = 0;
+        s->lin_checksum_sum = 0;
+        return;
     }
 
     if (asclin_buffer_free(s) == 0) {
@@ -196,6 +211,10 @@ static void asclin_lin_bus_receive(TriCoreASCLINState *s, uint8_t byte)
     }
     s->rxbuf[s->rxbufwriteidx] = byte;
     s->rxbufwriteidx = (s->rxbufwriteidx + 1) % ASCLIN_RX_BUFFER;
+    if (s->lin_pid_seen && s->lin_data_count < 8) {
+        s->lin_checksum_sum += byte;
+        s->lin_data_count++;
+    }
     qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RFL | MASK_FLAGS_RR | MASK_FLAGS_RH);
     asclin_pulse_irq(s, MASK_FLAGS_RFL);
 }
@@ -747,6 +766,8 @@ static void asclin_uart_reset(DeviceState *d)
     s->lin_sync_seen = false;
     s->lin_pid_seen = false;
     s->lin_gateway_rx_type = 0;
+    s->lin_data_count = 0;
+    s->lin_checksum_sum = 0;
 }
 
 static void asclin_uart_update_parameters(TriCoreASCLINState *s)
@@ -847,6 +868,8 @@ static const VMStateDescription vmstate_asclin_uart = {
         VMSTATE_BOOL(block_tx_enabled, TriCoreASCLINState),
         VMSTATE_BOOL(lin_gateway, TriCoreASCLINState),
         VMSTATE_UINT8(lin_gateway_rx_type, TriCoreASCLINState),
+        VMSTATE_UINT8(lin_data_count, TriCoreASCLINState),
+        VMSTATE_UINT16(lin_checksum_sum, TriCoreASCLINState),
         VMSTATE_BOOL(lin_sync_seen, TriCoreASCLINState),
         VMSTATE_BOOL(lin_pid_seen, TriCoreASCLINState),
         VMSTATE_END_OF_LIST()

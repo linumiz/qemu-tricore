@@ -111,6 +111,8 @@ struct TriCoreASCLINState {
     uint8_t lin_gateway_rx_type;
     bool lin_sync_seen;
     bool lin_pid_seen;
+    uint8_t lin_data_count;
+    uint16_t lin_checksum_sum;
     ptimer_state *ptimer;
     QEMUBH *bh;
 };
