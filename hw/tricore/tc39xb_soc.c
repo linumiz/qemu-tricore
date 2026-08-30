@@ -320,7 +320,7 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     for (unsigned i = 0; i < 3; i++) {
         s->mcan[i] = TRICORE_MCAN(object_new(TYPE_TRICORE_MCAN));
     }
-    s->eth = TRICORE_ETH(object_new(TYPE_TRICORE_ETH));
+    s->eth = TRICORE_ETH(object_new(TYPE_TRICORE_GETH));
 
     /* Parent all devices so sysbus_realize_and_unref does not free them */
     object_property_add_child(OBJECT(dev_soc), "irbus", OBJECT(s->irbus));
