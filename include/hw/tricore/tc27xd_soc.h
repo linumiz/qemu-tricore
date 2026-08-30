@@ -95,6 +95,7 @@ typedef struct TC27XDSoCState {
     TriCoreSCUState *scu;
     TriCoreSTMState *stm;
     TriCoreASCLINState *asclin;
+    TriCoreASCLINState *asclin_extra[3];
     TriCoreSFRState *sfr;
 
     TC27XDSoCFlashMemState flashmem;
