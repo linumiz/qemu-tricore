@@ -27,6 +27,7 @@
 #define ERAY_MBID      0x124
 #define ERAY_MBCTRL    0x128
 #define ERAY_MBPENDING 0x12c
+#define ERAY_SCHED_CFG 0x130
 
 #define CCSV_POC_SHIFT 0
 #define CCSV_POC_MASK  0x3f
@@ -42,9 +43,30 @@
 #define MBCTRL_COMMIT  BIT(0)
 #define MBCTRL_UNLOCK  BIT(1)
 #define MBCTRL_CHANNEL_B BIT(2)
+#define ERAY_CYCLE_NS 1000
 
 static QTAILQ_HEAD(, TriCoreERAYState) eray_bus =
     QTAILQ_HEAD_INITIALIZER(eray_bus);
+
+static void eray_update_irq(TriCoreERAYState *s);
+static void eray_schedule(TriCoreERAYState *s);
+
+static void eray_scheduler_cb(void *opaque)
+{
+    TriCoreERAYState *s = opaque;
+    if (s->ccsv == POC_NORMAL_ACTIVE) {
+        s->cycle = (s->cycle + 1) & 0x3f;
+        s->slot_status = (s->slot_status & 0x80000000) | (s->cycle << 16);
+        s->ccev |= BIT(2); /* cycle start event */
+        eray_update_irq(s);
+        eray_schedule(s);
+    }
+}
+
+static void eray_schedule(TriCoreERAYState *s)
+{
+    timer_mod(s->scheduler, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + ERAY_CYCLE_NS);
+}
 
 static void eray_update_irq(TriCoreERAYState *s)
 {
@@ -58,9 +80,9 @@ static void eray_command(TriCoreERAYState *s, uint32_t cmd)
     switch (cmd & 0xff) {
     case CMD_CONFIG: s->ccsv = POC_CONFIG; break;
     case CMD_READY: s->ccsv = POC_READY; break;
-    case CMD_COLDSTART: s->ccsv = POC_NORMAL_ACTIVE; s->cycle = 0; break;
-    case CMD_RUN: s->ccsv = POC_NORMAL_ACTIVE; break;
-    case CMD_HALT: s->ccsv = POC_HALT; break;
+    case CMD_COLDSTART: s->ccsv = POC_NORMAL_ACTIVE; s->cycle = 0; eray_schedule(s); break;
+    case CMD_RUN: s->ccsv = POC_NORMAL_ACTIVE; eray_schedule(s); break;
+    case CMD_HALT: s->ccsv = POC_HALT; timer_del(s->scheduler); break;
     default: s->ccev |= BIT(0); break;
     }
     eray_update_irq(s);
@@ -109,6 +131,7 @@ static uint64_t eray_read(void *opaque, hwaddr off, unsigned size)
     case ERAY_MBID: return s->mbid;
     case ERAY_MBCTRL: return s->mbctrl;
     case ERAY_MBPENDING: return s->mbsc1 | s->ndat1;
+    case ERAY_SCHED_CFG: return ERAY_CYCLE_NS;
     default: return 0;
     }
 }
@@ -146,6 +169,7 @@ static void eray_reset(DeviceState *dev)
     s->ccev = s->succ1 = s->nemc = s->mbsc1 = s->ndat1 = 0;
     s->command = s->cycle = s->slot_status = 0;
     s->mbid = s->mbctrl = 0;
+    timer_del(s->scheduler);
     memset(s->msg_data, 0, sizeof(s->msg_data));
     eray_update_irq(s);
 }
@@ -166,6 +190,7 @@ static void eray_realize(DeviceState *dev, Error **errp)
                           "tricore-eray", 0x1000);
     memory_region_init_ram(&s->msg_ram, OBJECT(dev), "tricore-eray-msg-ram",
                            sizeof(s->msg_data), &error_fatal);
+    s->scheduler = timer_new_ns(QEMU_CLOCK_VIRTUAL, eray_scheduler_cb, s);
     QTAILQ_INSERT_TAIL(&eray_bus, s, bus_node);
 }
 
@@ -177,7 +202,8 @@ static const VMStateDescription vmstate_eray = {
         VMSTATE_UINT32(mbsc1, TriCoreERAYState), VMSTATE_UINT32(ndat1, TriCoreERAYState),
         VMSTATE_UINT32(command, TriCoreERAYState), VMSTATE_UINT32(cycle, TriCoreERAYState),
         VMSTATE_UINT32(slot_status, TriCoreERAYState), VMSTATE_UINT32(mbid, TriCoreERAYState),
-        VMSTATE_UINT32(mbctrl, TriCoreERAYState), VMSTATE_END_OF_LIST()
+        VMSTATE_UINT32(mbctrl, TriCoreERAYState), VMSTATE_TIMER_PTR(scheduler, TriCoreERAYState),
+        VMSTATE_END_OF_LIST()
     }
 };
 

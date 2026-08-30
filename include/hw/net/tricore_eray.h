@@ -9,6 +9,7 @@
 
 #include "hw/core/sysbus.h"
 #include "qemu/queue.h"
+#include "qemu/timer.h"
 
 /* Register/message layout follows the public AURIX ERAY User Manuals and
  * the publicly available Infineon IfxEray_* headers. */
@@ -26,6 +27,7 @@ typedef struct TriCoreERAYState {
     uint32_t cycle;
     uint32_t slot_status;
     uint32_t mbid, mbctrl;
+    QEMUTimer *scheduler;
     QTAILQ_ENTRY(TriCoreERAYState) bus_node;
     uint8_t msg_data[16 * 1024];
 } TriCoreERAYState;
