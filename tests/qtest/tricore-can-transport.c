@@ -127,6 +127,17 @@ static void test_eray_profiles(void)
     qtest_start("-machine KIT_A3G_TC4D7_LITE");
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C100), ==, 1);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D100), ==, 1);
+    /* TC4x reset acceptance covers both ERAY channel banks and FIFO state. */
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C158), ==, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D158), ==, 0);
+    qtest_writel(global_qtest, 0xF441C128, 1u << 4);
+    qtest_writel(global_qtest, 0xF441D128, 1u << 4);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C104) & (1u << 6), !=, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D104) & (1u << 6), !=, 0);
+    qtest_writel(global_qtest, 0xF441C104, 1u << 6);
+    qtest_writel(global_qtest, 0xF441D104, 1u << 6);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C104) & (1u << 6), ==, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D104) & (1u << 6), ==, 0);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C0F0), ==, 0);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C0F4), ==, 0);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C110), ==, 0);
