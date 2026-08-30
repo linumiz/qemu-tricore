@@ -232,6 +232,24 @@ static void test_eray_profiles(void)
     qtest_clock_step(global_qtest, 1000);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C120) & (1u << 30),
                      !=, 0);
+    /* A static request submitted after its slot boundary is rejected. */
+    qtest_writel(global_qtest, 0xF441C104, 0xff);
+    qtest_writel(global_qtest, 0xF441C134, 1);
+    qtest_writel(global_qtest, 0xF441C138, 2);
+    qtest_writel(global_qtest, 0xF441C124, 0);
+    qtest_writel(global_qtest, 0xF441E000, 1);
+    qtest_writel(global_qtest, 0xF441C128, 2);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C104) & 8, !=, 0);
+    qtest_writel(global_qtest, 0xF441C104, 8);
+    /* Guardian ownership is an authorization failure, not a bus delivery. */
+    qtest_writel(global_qtest, 0xF441C140, 1);
+    qtest_writel(global_qtest, 0xF441E000, 101);
+    qtest_writel(global_qtest, 0xF441C128, 2);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C104) & 8, !=, 0);
+    qtest_writel(global_qtest, 0xF441C104, 8);
+    qtest_writel(global_qtest, 0xF441C140, 0);
     /* A non-matching slot filter suppresses delivery at the receiver. */
     qtest_writel(global_qtest, 0xF441D0F4, 0xffffffff);
     qtest_writel(global_qtest, 0xF441D0F0, 0xffffffff);

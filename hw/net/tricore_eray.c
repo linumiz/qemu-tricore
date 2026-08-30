@@ -308,6 +308,8 @@ static void eray_commit_message(TriCoreERAYState *s)
     s->slot_status |= header_flags & ERAY_HDR_PUBLIC_MASK;
     if (s->guardian || !(s->channel_mask & ((s->mbctrl & MBCTRL_CHANNEL_B) ? 2 : 1))) {
         s->ccev |= CCEV_SLOT_ERROR; /* bus guardian/channel violation */
+        s->host_busy_ch[channel] = 0;
+        s->host_busy = 0;
         eray_update_irq(s);
         return;
     }
@@ -337,6 +339,16 @@ static void eray_commit_message(TriCoreERAYState *s)
     if (s->sched_cfg & 1) {
         /* With scheduling enabled, commit is a host/shadow-buffer request;
          * transmission occurs at the next configured virtual slot. */
+        if (frame_id <= s->static_slots &&
+            s->slot_counter >= s->tx_due_slot) {
+            /* A host request arriving after its static slot is not silently
+             * sent in a later slot; report the public slot error instead. */
+            s->ccev |= CCEV_SLOT_ERROR;
+            s->host_busy_ch[channel] = 0;
+            s->host_busy = 0;
+            eray_update_irq(s);
+            return;
+        }
         uint32_t due_cycle = (s->cycle + 1) % MAX(1u, s->cycle_length);
         if (frame_id >= s->dynamic_start &&
             !eray_dynamic_collision(s, frame_id, due_cycle, s->tx_due_slot)) {
