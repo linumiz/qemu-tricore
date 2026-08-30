@@ -94,6 +94,7 @@ typedef struct CanBusBitSample {
 
 struct CanBusBitClientInfo {
     void (*sample)(CanBusClientState *, const CanBusBitSample *sample);
+    void (*arbitration_lost)(CanBusClientState *);
 };
 
 #define TYPE_CAN_BUS "can-bus"
@@ -145,6 +146,10 @@ bool can_bus_wired_and(const bool *drives, size_t drive_count);
 /* Return the surviving sender index, or -1 when no sender is provided. */
 ssize_t can_bus_arbitrate_bits(const uint8_t *streams, size_t sender_count,
                                size_t stream_stride, size_t bit_count);
+
+ssize_t can_bus_arbitrate_clients(CanBusClientState *const *senders,
+                                  const uint8_t *streams, size_t sender_count,
+                                  size_t stream_stride, size_t bit_count);
 
 int can_bus_client_set_filters(CanBusClientState *,
                                const struct qemu_can_filter *filters,

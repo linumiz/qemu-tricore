@@ -258,6 +258,24 @@ ssize_t can_bus_arbitrate_bits(const uint8_t *streams, size_t sender_count,
     return -1;
 }
 
+ssize_t can_bus_arbitrate_clients(CanBusClientState *const *senders,
+                                  const uint8_t *streams, size_t sender_count,
+                                  size_t stream_stride, size_t bit_count)
+{
+    ssize_t winner = can_bus_arbitrate_bits(streams, sender_count,
+                                             stream_stride, bit_count);
+    if (winner < 0 || !senders) {
+        return winner;
+    }
+    for (size_t i = 0; i < sender_count; i++) {
+        if ((ssize_t)i != winner && senders[i] && senders[i]->bit_info &&
+            senders[i]->bit_info->arbitration_lost) {
+            senders[i]->bit_info->arbitration_lost(senders[i]);
+        }
+    }
+    return winner;
+}
+
 int can_bus_filter_match(struct qemu_can_filter *filter, qemu_canid_t can_id)
 {
     int m;
