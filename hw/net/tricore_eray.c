@@ -1,3 +1,14 @@
+/*
+ * AURIX ERAY/FlexRay emulation based solely on public sources.
+ *
+ * Register offsets, controller-state encodings and message-RAM concepts are
+ * derived from the public TC2x/TC3x/TC4x User Manuals and the corresponding
+ * Infineon IfxEray_* register and driver headers published on GitHub.  Local
+ * iLLD copies in this workspace are developer reference material only; they
+ * are not project-provided QEMU source.  No NDA-only manuals, vendor RTL,
+ * firmware binaries or confidential PHY details are used here.
+ */
+
 #include "qemu/osdep.h"
 #include "hw/net/tricore_eray.h"
 #include "hw/core/irq.h"

@@ -1,3 +1,9 @@
+/*
+ * Public-source provenance: this interface reflects only the public AURIX
+ * ERAY User Manuals and Infineon IfxEray_* headers published on GitHub.
+ * Workspace copies of those iLLDs are kept for reference and are not
+ * project-provided source; NDA-only implementation details are excluded.
+ */
 #ifndef HW_NET_TRICORE_ERAY_H
 #define HW_NET_TRICORE_ERAY_H
 
