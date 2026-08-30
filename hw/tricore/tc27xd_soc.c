@@ -381,6 +381,8 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
                                 &s->asclin->iomem);
     memory_region_add_subregion(sysmem, sc->memmap[TC27XD_MCAN].base,
                                 &s->mcan->iomem);
+    memory_region_add_subregion(sysmem, sc->memmap[TC27XD_MCAN].base + 0x3000,
+                                &s->mcan->msg_ram);
     for (unsigned i = 0; i < 3; i++) {
         memory_region_add_subregion(sysmem,
             sc->memmap[TC27XD_ASCLIN].base + 0x200 * (i + 1),

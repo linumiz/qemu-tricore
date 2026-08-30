@@ -54,6 +54,7 @@ REG32(MO0_AMR, 0x90c)
 #define MO_STRIDE 0x20
 #define MO_REG(n, off) ((off) + (n) * MO_STRIDE)
 #define MCAN_OBJECTS 256
+#define MCAN_MSG_RAM_SIZE 0x4000
 
 static void tricore_mcan_update_irq(TriCoreMCANState *s)
 {
@@ -393,16 +394,24 @@ static void tricore_mcan_unrealize(DeviceState *dev)
 static void tricore_mcan_init(Object *obj)
 {
     TriCoreMCANState *s = TRICORE_MCAN(obj);
+    static unsigned instance_id;
+    g_autofree char *ram_name =
+        g_strdup_printf("tricore-mcan-message-ram%u", instance_id++);
     for (unsigned i = 0; i < 16; i++) {
         sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq[i]);
     }
     memory_region_init_io(&s->iomem, obj, &tricore_mcan_ops, s,
                           TYPE_TRICORE_MCAN, 0x3000);
+    /* Bosch M_CAN keeps message storage outside the register aperture.  A
+     * dedicated RAM region lets each wrapper expose the documented layout. */
+    memory_region_init_ram(&s->msg_ram, obj, ram_name,
+                           MCAN_MSG_RAM_SIZE, &error_fatal);
     /* Reset value accepts every identifier until firmware programs a mask. */
     for (unsigned i = 0; i < 4; i++) {
         s->regs[MO_REG(i, R_MO0_AMR) / 4] = UINT32_MAX;
     }
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
+    sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->msg_ram);
 }
 
 static const VMStateDescription vmstate_tricore_mcan = {

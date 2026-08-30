@@ -131,6 +131,7 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
             return;
         }
         sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, mcan_base[i]);
+        sysbus_mmio_map(SYS_BUS_DEVICE(dev), 1, mcan_base[i] + 0x3000);
         /* Keep all documented service-request outputs visible at the TC4x
          * interrupt router; the controller core assigns event meaning. */
         for (unsigned irq = 0; irq < 16; irq++) {
