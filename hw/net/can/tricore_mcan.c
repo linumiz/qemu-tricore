@@ -43,6 +43,8 @@ REG32(NODE_SELECT, 0x270)
 REG32(NODE_STATUS, 0x274)
 #define LIST_BASE 0x100
 #define LIST_COUNT 16
+#define MSPND_BASE 0x140
+#define MSPND_COUNT 8
 REG32(MO0_DATAL, 0x910)
 REG32(MO0_DATAH, 0x914)
 REG32(MO0_AR, 0x918)
@@ -126,6 +128,8 @@ static ssize_t tricore_mcan_receive(CanBusClientState *client,
     s->regs[MO_REG(object, R_MO0_AR) / 4] = s->rx_frame.can_id;
     s->regs[MO_REG(object, R_MO0_DATAL) / 4] = s->regs[R_RXDATAL / 4];
     s->regs[MO_REG(object, R_MO0_DATAH) / 4] = s->regs[R_RXDATAH / 4];
+    s->rx_object = object;
+    s->object_pending[object] = true;
     if ((s->regs[R_GATEWAY_ENABLE / 4] & 1) &&
         s->regs[R_GATEWAY_TARGET / 4] < MCAN_OBJECTS) {
         unsigned target = s->regs[R_GATEWAY_TARGET / 4];
@@ -225,6 +229,15 @@ static uint64_t tricore_mcan_read(void *opaque, hwaddr addr, unsigned size)
         return begin | ((begin + size - 1) << 8) | (size << 16) |
                (empty ? BIT(24) : 0);
     }
+    if (addr >= MSPND_BASE && addr < MSPND_BASE + MSPND_COUNT * 4 &&
+        (addr & 3) == 0) {
+        unsigned word = (addr - MSPND_BASE) / 4;
+        uint32_t pending = 0;
+        for (unsigned bit = 0; bit < 32; bit++) {
+            pending |= (uint32_t)s->object_pending[word * 32 + bit] << bit;
+        }
+        return pending;
+    }
     if (addr >= 0x80 && addr < 0xc0 && (addr & 3) == 0) {
         return ldl_le_p(&s->rx_data[addr - 0x80]);
     }
@@ -233,6 +246,7 @@ static uint64_t tricore_mcan_read(void *opaque, hwaddr addr, unsigned size)
     }
     if (addr == R_RXDATAH) {
         uint32_t value = s->regs[index];
+        s->object_pending[s->rx_object] = false;
         tricore_mcan_load_rx(s);
         tricore_mcan_update_irq(s);
         return value;
@@ -250,6 +264,14 @@ static void tricore_mcan_write(void *opaque, hwaddr addr, uint64_t value,
     }
     if (addr == R_STATUS) {
         s->regs[index] &= ~(uint32_t)value;
+    } else if (addr >= MSPND_BASE && addr < MSPND_BASE + MSPND_COUNT * 4 &&
+               (addr & 3) == 0) {
+        unsigned word = (addr - MSPND_BASE) / 4;
+        for (unsigned bit = 0; bit < 32; bit++) {
+            if (value & BIT(bit)) {
+                s->object_pending[word * 32 + bit] = false;
+            }
+        }
     } else if (addr == R_FIFO_CLEAR && (value & 1)) {
         s->rx_fifo_head = s->rx_fifo_tail = s->rx_fifo_count = 0;
         s->rx_pending = false;
@@ -357,6 +379,8 @@ static const VMStateDescription vmstate_tricore_mcan = {
         VMSTATE_UINT8(enabled_nodes, TriCoreMCANState),
         VMSTATE_UINT8(selected_node, TriCoreMCANState),
         VMSTATE_BOOL_ARRAY(object_valid, TriCoreMCANState, MCAN_OBJECTS),
+        VMSTATE_BOOL_ARRAY(object_pending, TriCoreMCANState, MCAN_OBJECTS),
+        VMSTATE_UINT8(rx_object, TriCoreMCANState),
         VMSTATE_BUFFER_UNSAFE_INFO(rx_fifo, TriCoreMCANState, 1,
                                    vmstate_info_buffer,
                                    sizeof(((TriCoreMCANState *)0)->rx_fifo)),
