@@ -225,15 +225,18 @@ invalid:
 
 static void eray_commit_message(TriCoreERAYState *s)
 {
+    unsigned channel = !!(s->mbctrl & MBCTRL_CHANNEL_B);
     uint32_t offset = (s->mbid & 0xff) * 64;
     uint32_t frame_id = ldl_le_p(&s->msg_data[offset]);
-    if (s->unlock_key != 0xa5) {
+    if (s->unlock_key_ch[channel] != 0xa5) {
         /* The public message-handler sequence requires an unlock write before
          * a commit; expose legacy/direct commits as a protocol error. */
         s->ccev |= CCEV_UNLOCK_ERROR;
         return;
     }
+    s->unlock_key_ch[channel] = 0;
     s->unlock_key = 0;
+    s->host_busy_ch[channel] = 1;
     s->host_busy = 1;
     uint32_t payload_len = ldl_le_p(&s->msg_data[offset + 4]) & 0x7f;
     uint32_t encoded_payload_len = payload_len;
@@ -249,6 +252,7 @@ static void eray_commit_message(TriCoreERAYState *s)
         (header_flags & ~ERAY_HDR_PUBLIC_MASK) ||
         ((header_flags & ERAY_HDR_NULL) && encoded_payload_len != 0)) {
         s->ccev |= CCEV_HEADER_ERROR;
+        s->host_busy_ch[channel] = 0;
         s->host_busy = 0;
         eray_update_irq(s);
         return;
@@ -278,6 +282,7 @@ static void eray_commit_message(TriCoreERAYState *s)
         s->tx_due_slot = frame_id;
     } else {
         s->ccev |= CCEV_SLOT_ERROR;
+        s->host_busy_ch[channel] = 0;
         s->host_busy = 0;
         eray_update_irq(s);
         return;
@@ -304,6 +309,7 @@ static void eray_commit_message(TriCoreERAYState *s)
         s->tx_payload_len = payload_len;
         s->tx_pending = true;
         s->mbsc1 |= BIT(s->mbid & 31);
+        s->shadow_busy_ch[channel] = 1;
         s->shadow_busy = 1;
         eray_update_irq(s);
         return;
@@ -314,6 +320,7 @@ static void eray_commit_message(TriCoreERAYState *s)
 static void eray_deliver_frame(TriCoreERAYState *s, uint32_t frame_id,
                                const uint8_t *frame)
 {
+    unsigned channel = !!(s->mbctrl & MBCTRL_CHANNEL_B);
     TriCoreERAYState *peer;
     /* Static and dynamic segments share the same portable representation;
      * the slot marker identifies the segment while delivery remains ordered. */
@@ -375,6 +382,8 @@ static void eray_deliver_frame(TriCoreERAYState *s, uint32_t frame_id,
     } else {
         s->mbsc0 |= BIT(s->mbid & 31);
     }
+    s->host_busy_ch[channel] = 0;
+    s->shadow_busy_ch[channel] = 0;
     s->host_busy = 0;
     s->shadow_busy = 0;
     eray_update_irq(s);
@@ -414,7 +423,10 @@ static uint64_t eray_read(void *opaque, hwaddr off, unsigned size)
     case ERAY_FILTER_ID: return s->slot_filter;
     case ERAY_FILTER_CYCLE: return s->cycle_filter;
     case ERAY_MHDS: return s->host_busy | (s->shadow_busy << 1) |
-                            ((s->unlock_key & 0xff) << 8);
+                            ((s->unlock_key & 0xff) << 8) |
+                            (s->host_busy_ch[1] << 16) |
+                            (s->shadow_busy_ch[1] << 17) |
+                            ((s->unlock_key_ch[1] & 0xff) << 24);
     case ERAY_FSR_TAIL: return s->fifo_tail;
     case ERAY_FSR_CRIT: return s->fifo_critical;
     case ERAY_IRQ0_MASK: return s->irq0_mask;
@@ -448,6 +460,7 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
         s->mbctrl = value;
         if (value & MBCTRL_UNLOCK) {
             s->unlock_key = 0xa5;
+            s->unlock_key_ch[(value & MBCTRL_CHANNEL_B) != 0] = 0xa5;
         }
         if (value & MBCTRL_COMMIT) {
             eray_commit_message(s);
@@ -482,7 +495,11 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
     case ERAY_MRC: s->fifo_start = value & 0xff; break;
     case ERAY_FCL: s->fifo_depth = value & 0xff; break;
     case ERAY_FSR: s->fifo_status &= ~value; break; /* status W1C */
-    case ERAY_MHDS: s->host_busy = s->shadow_busy = 0; break;
+    case ERAY_MHDS:
+        s->host_busy = s->shadow_busy = 0;
+        s->host_busy_ch[0] = s->host_busy_ch[1] = 0;
+        s->shadow_busy_ch[0] = s->shadow_busy_ch[1] = 0;
+        break;
     case ERAY_FSR_TAIL: s->fifo_tail = value & 0xff; break;
     case ERAY_FSR_CRIT: s->fifo_critical = value & 0xff; break;
     case ERAY_IRQ0_MASK: s->irq0_mask = value & 0xffff; break;
@@ -534,6 +551,9 @@ static void eray_reset(DeviceState *dev)
     s->fifo_start = s->fifo_depth = s->fifo_status = 0;
     s->fifo_tail = s->fifo_critical = 0;
     s->host_busy = s->shadow_busy = s->unlock_key = 0;
+    memset(s->host_busy_ch, 0, sizeof(s->host_busy_ch));
+    memset(s->shadow_busy_ch, 0, sizeof(s->shadow_busy_ch));
+    memset(s->unlock_key_ch, 0, sizeof(s->unlock_key_ch));
     s->irq0_mask = s->irq1_mask = 0;
     s->slot_filter = s->cycle_filter = 0;
     s->last_rx_id = s->last_rx_cycle = 0;
@@ -610,6 +630,9 @@ static const VMStateDescription vmstate_eray = {
         VMSTATE_UINT32(fifo_tail, TriCoreERAYState), VMSTATE_UINT32(fifo_critical, TriCoreERAYState),
         VMSTATE_UINT32(host_busy, TriCoreERAYState), VMSTATE_UINT32(shadow_busy, TriCoreERAYState),
         VMSTATE_UINT32(unlock_key, TriCoreERAYState),
+        VMSTATE_UINT32_ARRAY(host_busy_ch, TriCoreERAYState, 2),
+        VMSTATE_UINT32_ARRAY(shadow_busy_ch, TriCoreERAYState, 2),
+        VMSTATE_UINT32_ARRAY(unlock_key_ch, TriCoreERAYState, 2),
         VMSTATE_UINT32(irq0_mask, TriCoreERAYState), VMSTATE_UINT32(irq1_mask, TriCoreERAYState),
         VMSTATE_UINT32(slot_filter, TriCoreERAYState),
         VMSTATE_UINT32(cycle_filter, TriCoreERAYState),

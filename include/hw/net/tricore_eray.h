@@ -34,6 +34,7 @@ typedef struct TriCoreERAYState {
     uint32_t static_slots, dynamic_start, minislot, guardian, channel_mask;
     uint32_t fifo_start, fifo_depth, fifo_status, fifo_tail, fifo_critical;
     uint32_t host_busy, shadow_busy, unlock_key;
+    uint32_t host_busy_ch[2], shadow_busy_ch[2], unlock_key_ch[2];
     uint32_t irq0_mask, irq1_mask;
     uint32_t slot_filter, cycle_filter;
     uint32_t last_rx_id, last_rx_cycle;

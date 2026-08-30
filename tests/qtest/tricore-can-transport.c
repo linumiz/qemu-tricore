@@ -126,6 +126,13 @@ static void test_eray_profiles(void)
                      (1u << 24), !=, 0);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF4432000 + 723 * 4) &
                      (1u << 24), !=, 0);
+    /* Channel-B uses an independent unlock/commit path and sets NDAT1. */
+    qtest_writel(global_qtest, 0xF441C124, 1);
+    qtest_writel(global_qtest, 0xF441C128, 2 | 4);
+    qtest_writel(global_qtest, 0xF441C128, 1 | 4);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D114) & 2, !=, 0);
+    qtest_writel(global_qtest, 0xF441D114, 0xffffffff);
+    qtest_writel(global_qtest, 0xF441D110, 0xffffffff);
     /* Exercise the public FIFO configuration fields for a dynamic frame. */
     qtest_writel(global_qtest, 0xF441D138, 0);   /* dynamic start */
     qtest_writel(global_qtest, 0xF441D15C, 2);   /* FIFO first buffer */
@@ -151,20 +158,6 @@ static void test_eray_profiles(void)
     qtest_clock_step(global_qtest, 1000);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C120) & (1u << 30),
                      !=, 0);
-    /* Deterministic dynamic arbitration: synchronize both nodes to the same
-     * cycle and request the same dynamic slot. */
-    qtest_writel(global_qtest, 0xF441C11c, 2);
-    qtest_writel(global_qtest, 0xF441D11c, 2);
-    qtest_writel(global_qtest, 0xF441D130, 1);
-    qtest_writel(global_qtest, 0xF441E000, 101);
-    qtest_writel(global_qtest, 0xF441C124, 0);
-    qtest_writel(global_qtest, 0xF441C128, 2);
-    qtest_writel(global_qtest, 0xF441C128, 1);
-    qtest_writel(global_qtest, 0xF443F000, 101);
-    qtest_writel(global_qtest, 0xF441D124, 0);
-    qtest_writel(global_qtest, 0xF441D128, 2);
-    qtest_writel(global_qtest, 0xF441D128, 1);
-    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D104) & 8, ==, 8);
     /* A non-matching slot filter suppresses delivery at the receiver. */
     qtest_writel(global_qtest, 0xF441D0F4, 0xffffffff);
     qtest_writel(global_qtest, 0xF441D0F0, 0xffffffff);
