@@ -25,6 +25,8 @@ typedef struct TriCoreERAYState {
     uint32_t ccsv, ccev, succ1, succ2, succ3, nemc;
     uint32_t mbsc0, mbsc1, ndat0, ndat1;
     uint32_t prtc1, prtc2;
+    uint32_t gtu_microticks, gtu_macroticks, cycle_length;
+    uint32_t action_point_static, action_point_dynamic;
     uint32_t command;
     uint32_t cycle;
     uint32_t slot_status;

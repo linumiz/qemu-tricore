@@ -49,6 +49,11 @@
 #define ERAY_FSR_CRIT 0x174
 #define ERAY_IRQ0_MASK 0x178
 #define ERAY_IRQ1_MASK 0x17c
+#define ERAY_GTU_MICROTICKS 0x180
+#define ERAY_GTU_MACROTICKS 0x184
+#define ERAY_GTU_CYCLE 0x188
+#define ERAY_ACTION_STATIC 0x18c
+#define ERAY_ACTION_DYNAMIC 0x190
 
 #define CCSV_POC_SHIFT 0
 #define CCSV_POC_MASK  0x3f
@@ -63,9 +68,11 @@
 #define CMD_HALT       0x05
 #define CMD_WAKEUP     0x06
 #define CMD_FREEZE     0x07
+#define CMD_WARMSTART  0x08
 #define MBCTRL_COMMIT  BIT(0)
 #define MBCTRL_UNLOCK  BIT(1)
 #define MBCTRL_CHANNEL_B BIT(2)
+#define MBCTRL_FIFO_POP BIT(4)
 #define ERAY_CYCLE_NS 1000
 
 static QTAILQ_HEAD(, TriCoreERAYState) eray_bus =
@@ -80,7 +87,7 @@ static void eray_scheduler_cb(void *opaque)
 {
     TriCoreERAYState *s = opaque;
     if (s->ccsv == POC_NORMAL_ACTIVE) {
-        s->cycle = (s->cycle + 1) & 0x3f;
+        s->cycle = (s->cycle + 1) % MAX(1, s->cycle_length);
         s->slot_status = (s->slot_status & 0x80000000) | (s->cycle << 16);
         s->ccev |= BIT(2); /* cycle start event */
         if (s->tx_pending && s->cycle == s->tx_due_cycle) {
@@ -131,6 +138,11 @@ static void eray_command(TriCoreERAYState *s, uint32_t cmd)
         break;
     case CMD_WAKEUP: s->ccsv = POC_READY; break;
     case CMD_FREEZE: s->ccsv = POC_HALT; timer_del(s->scheduler); break;
+    case CMD_WARMSTART:
+        if (s->ccsv != POC_READY && s->ccsv != POC_HALT) goto invalid;
+        s->ccsv = POC_NORMAL_ACTIVE;
+        eray_schedule(s);
+        break;
     default: goto invalid;
     }
     eray_update_irq(s);
@@ -293,6 +305,11 @@ static uint64_t eray_read(void *opaque, hwaddr off, unsigned size)
     case ERAY_FSR_CRIT: return s->fifo_critical;
     case ERAY_IRQ0_MASK: return s->irq0_mask;
     case ERAY_IRQ1_MASK: return s->irq1_mask;
+    case ERAY_GTU_MICROTICKS: return s->gtu_microticks;
+    case ERAY_GTU_MACROTICKS: return s->gtu_macroticks;
+    case ERAY_GTU_CYCLE: return s->cycle_length;
+    case ERAY_ACTION_STATIC: return s->action_point_static;
+    case ERAY_ACTION_DYNAMIC: return s->action_point_dynamic;
     default: return 0;
     }
 }
@@ -321,6 +338,16 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
         if (value & MBCTRL_COMMIT) {
             eray_commit_message(s);
         }
+        if (value & MBCTRL_FIFO_POP) {
+            uint32_t count = (s->fifo_status >> 8) & 0xff;
+            if (!count) {
+                s->ccev |= BIT(6); /* documented empty-FIFO access */
+            } else {
+                count--;
+                s->fifo_status = (s->fifo_status & 0xff) | (count << 8);
+                s->fifo_tail = (s->fifo_tail + 1) & 0xff;
+            }
+        }
         break;
     case ERAY_STATIC_SLOTS: s->static_slots = value & 0x7ff; break;
     case ERAY_DYNAMIC_START: s->dynamic_start = value & 0x7ff; break;
@@ -346,6 +373,11 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
     case ERAY_FSR_CRIT: s->fifo_critical = value & 0xff; break;
     case ERAY_IRQ0_MASK: s->irq0_mask = value & 0xffff; break;
     case ERAY_IRQ1_MASK: s->irq1_mask = value; break;
+    case ERAY_GTU_MICROTICKS: s->gtu_microticks = value & 0xffff; break;
+    case ERAY_GTU_MACROTICKS: s->gtu_macroticks = value & 0xffff; break;
+    case ERAY_GTU_CYCLE: s->cycle_length = value & 0x3f; break;
+    case ERAY_ACTION_STATIC: s->action_point_static = value & 0xffff; break;
+    case ERAY_ACTION_DYNAMIC: s->action_point_dynamic = value & 0xffff; break;
     case ERAY_FILTER_ID: s->slot_filter = value & 0x7ff; break;
     case ERAY_FILTER_CYCLE: s->cycle_filter = value & 0x3f; break;
     default: break;
@@ -365,6 +397,10 @@ static void eray_reset(DeviceState *dev)
     s->ccsv = POC_CONFIG;
     s->ccev = s->succ1 = s->succ2 = s->succ3 = s->nemc = 0;
     s->prtc1 = s->prtc2 = 0;
+    s->gtu_microticks = 1;
+    s->gtu_macroticks = 1;
+    s->cycle_length = 64;
+    s->action_point_static = s->action_point_dynamic = 0;
     s->mbsc0 = s->mbsc1 = s->ndat0 = s->ndat1 = 0;
     s->command = s->cycle = s->slot_status = 0;
     s->mbid = s->mbctrl = 0;
@@ -429,6 +465,11 @@ static const VMStateDescription vmstate_eray = {
         VMSTATE_UINT32(succ1, TriCoreERAYState), VMSTATE_UINT32(succ2, TriCoreERAYState),
         VMSTATE_UINT32(succ3, TriCoreERAYState), VMSTATE_UINT32(nemc, TriCoreERAYState),
         VMSTATE_UINT32(prtc1, TriCoreERAYState), VMSTATE_UINT32(prtc2, TriCoreERAYState),
+        VMSTATE_UINT32(gtu_microticks, TriCoreERAYState),
+        VMSTATE_UINT32(gtu_macroticks, TriCoreERAYState),
+        VMSTATE_UINT32(cycle_length, TriCoreERAYState),
+        VMSTATE_UINT32(action_point_static, TriCoreERAYState),
+        VMSTATE_UINT32(action_point_dynamic, TriCoreERAYState),
         VMSTATE_UINT32(mbsc0, TriCoreERAYState), VMSTATE_UINT32(mbsc1, TriCoreERAYState),
         VMSTATE_UINT32(ndat0, TriCoreERAYState), VMSTATE_UINT32(ndat1, TriCoreERAYState),
         VMSTATE_UINT32(command, TriCoreERAYState), VMSTATE_UINT32(cycle, TriCoreERAYState),
