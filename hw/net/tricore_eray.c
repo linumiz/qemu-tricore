@@ -160,7 +160,11 @@ static void eray_scheduler_cb(void *opaque)
         s->slot_status = (s->slot_status & 0x80000000) |
                          (s->cycle << 16) | (s->slot_counter & 0x7ff);
         if (s->slot_counter >= s->static_slots) {
-            s->slot_status |= BIT(30) | (s->minislot_counter << 8);
+            /* The dynamic action point is a deterministic phase offset in
+             * the public model; expose it with the current minislot marker. */
+            uint32_t action = s->action_point_dynamic & 0xff;
+            s->slot_status |= BIT(30) |
+                              (((s->minislot_counter + action) & 0xff) << 8);
         }
         s->ccev |= CCEV_CYCLE_START;
         if (s->tx_pending && s->cycle == s->tx_due_cycle) {
@@ -310,8 +314,11 @@ static void eray_commit_message(TriCoreERAYState *s)
         /* Static slots are valid only in the configured static prefix. */
         s->tx_due_slot = frame_id;
     } else if (frame_id >= s->dynamic_start) {
-        /* Dynamic frames are assigned a deterministic minislot marker. */
-        s->tx_due_slot = frame_id;
+        /* Map each dynamic frame deterministically into the configured
+         * minislot range; peers therefore compare the same arbitration key. */
+        uint32_t range = MAX(1u, 256u - s->dynamic_start);
+        s->tx_due_slot = s->dynamic_start +
+                         ((frame_id - s->dynamic_start) % range);
     } else {
         s->ccev |= CCEV_SLOT_ERROR;
         s->host_busy_ch[channel] = 0;
@@ -322,7 +329,9 @@ static void eray_commit_message(TriCoreERAYState *s)
     /* Static slots are sent in the configured prefix; remaining frame IDs
      * use the dynamic segment and are represented by the minislot marker. */
     if (frame_id >= s->dynamic_start) {
-        s->slot_status |= BIT(30) | ((s->minislot & 0xff) << 8);
+        uint32_t action = s->action_point_dynamic & 0xff;
+        s->slot_status |= BIT(30) |
+                          (((s->minislot + action) & 0xff) << 8);
     }
     if (s->sched_cfg & 1) {
         /* With scheduling enabled, commit is a host/shadow-buffer request;
