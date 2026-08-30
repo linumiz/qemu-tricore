@@ -41,6 +41,8 @@ REG32(NODE2_CR, 0x240)
 REG32(NODE3_CR, 0x260)
 REG32(NODE_SELECT, 0x270)
 REG32(NODE_STATUS, 0x274)
+#define LIST_BASE 0x100
+#define LIST_COUNT 16
 REG32(MO0_DATAL, 0x910)
 REG32(MO0_DATAH, 0x914)
 REG32(MO0_AR, 0x918)
@@ -209,6 +211,14 @@ static uint64_t tricore_mcan_read(void *opaque, hwaddr addr, unsigned size)
     }
     if (addr == R_NODE_STATUS) {
         return s->enabled_nodes | ((uint32_t)s->selected_node << 8);
+    }
+    if (addr >= LIST_BASE && addr < LIST_BASE + LIST_COUNT * 4 &&
+        (addr & 3) == 0) {
+        unsigned list = (addr - LIST_BASE) / 4;
+        unsigned begin = list * (MCAN_OBJECTS / LIST_COUNT);
+        unsigned size = MCAN_OBJECTS / LIST_COUNT;
+        /* LIST fields are read-only hardware status in MultiCAN+. */
+        return begin | ((begin + size - 1) << 8) | (size << 16);
     }
     if (addr >= 0x80 && addr < 0xc0 && (addr & 3) == 0) {
         return ldl_le_p(&s->rx_data[addr - 0x80]);
