@@ -39,6 +39,8 @@ REG32(NODE0_BTR, 0x210)
 REG32(NODE1_CR, 0x220)
 REG32(NODE2_CR, 0x240)
 REG32(NODE3_CR, 0x260)
+REG32(NODE_SELECT, 0x270)
+REG32(NODE_STATUS, 0x274)
 REG32(MO0_DATAL, 0x910)
 REG32(MO0_DATAH, 0x914)
 REG32(MO0_AR, 0x918)
@@ -205,6 +207,9 @@ static uint64_t tricore_mcan_read(void *opaque, hwaddr addr, unsigned size)
     if (addr == R_RXDATAL) {
         return s->regs[index];
     }
+    if (addr == R_NODE_STATUS) {
+        return s->enabled_nodes | ((uint32_t)s->selected_node << 8);
+    }
     if (addr >= 0x80 && addr < 0xc0 && (addr & 3) == 0) {
         return ldl_le_p(&s->rx_data[addr - 0x80]);
     }
@@ -234,6 +239,9 @@ static void tricore_mcan_write(void *opaque, hwaddr addr, uint64_t value,
         s->rx_fifo_head = s->rx_fifo_tail = s->rx_fifo_count = 0;
         s->rx_pending = false;
         s->regs[R_STATUS / 4] &= ~R_STATUS_RX_PENDING_MASK;
+    } else if (addr == R_NODE_SELECT) {
+        /* Node selection is a QEMU-side view over the shared MultiCAN RAM. */
+        s->selected_node = MIN(value, 3u);
     } else if (addr >= 0x40 && addr < 0x80 && (addr & 3) == 0) {
         stl_le_p(&s->tx_data[addr - 0x40], value);
     } else if (addr == R_INT_ENABLE || addr == R_CONTROL ||
@@ -328,6 +336,7 @@ static const VMStateDescription vmstate_tricore_mcan = {
         VMSTATE_UINT8_ARRAY(rx_frame.data, TriCoreMCANState, 64),
         VMSTATE_BOOL(rx_pending, TriCoreMCANState),
         VMSTATE_UINT8(enabled_nodes, TriCoreMCANState),
+        VMSTATE_UINT8(selected_node, TriCoreMCANState),
         VMSTATE_BUFFER_UNSAFE_INFO(rx_fifo, TriCoreMCANState, 1,
                                    vmstate_info_buffer,
                                    sizeof(((TriCoreMCANState *)0)->rx_fifo)),
