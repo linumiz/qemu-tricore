@@ -409,6 +409,7 @@ static void uart_write(void *opaque, hwaddr offset, uint64_t value,
     TriCoreASCLINState *s = opaque;
     hwaddr reg_addr = offset >> 2;
     uint32_t val = (uint32_t)value;
+    bool old_lin_mode = asclin_lin_mode(s);
 
     /* TC4x TXDATA mirror writes enqueue data */
     if (offset >= TC4X_TXDATA_BASE && offset <= TC4X_TXDATA_LAST) {
@@ -540,6 +541,13 @@ static void uart_write(void *opaque, hwaddr offset, uint64_t value,
         reg_addr == TC4X_BRG / 4 || reg_addr == TC4X_FRAMECON / 4 ||
         reg_addr == TC4X_DATCON / 4) {
         asclin_uart_update_parameters(s);
+    }
+    if (reg_addr == FRAMECON || reg_addr == TC4X_FRAMECON / 4) {
+        if (old_lin_mode && !asclin_lin_mode(s)) {
+            qatomic_and(&s->regs[FLAGS],
+                        ~(MASK_FLAGS_TH | MASK_FLAGS_TR |
+                          MASK_FLAGS_RH | MASK_FLAGS_RR));
+        }
     }
 }
 
