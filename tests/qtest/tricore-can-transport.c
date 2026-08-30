@@ -135,6 +135,24 @@ static void test_eray_profiles(void)
     qtest_writel(global_qtest, 0xF441D128, 2);
     qtest_writel(global_qtest, 0xF441D128, 1);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D104) & 8, ==, 8);
+    /* A non-matching slot filter suppresses delivery at the receiver. */
+    qtest_writel(global_qtest, 0xF441D0F4, 0xffffffff);
+    qtest_writel(global_qtest, 0xF441D0F0, 0xffffffff);
+    qtest_writel(global_qtest, 0xF441D164, 200);
+    qtest_clock_step(global_qtest, 1000);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D0F4), ==, 0);
+    qtest_writel(global_qtest, 0xF441D164, 0);
+    /* A one-entry FIFO reports an overrun on the second accepted frame. */
+    qtest_writel(global_qtest, 0xF441D15C, 2);
+    qtest_writel(global_qtest, 0xF441D160, 1);
+    qtest_writel(global_qtest, 0xF441C130, 0); /* immediate TX */
+    qtest_writel(global_qtest, 0xF441E000, 10);
+    qtest_writel(global_qtest, 0xF441C128, 2);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    qtest_writel(global_qtest, 0xF441E000, 11);
+    qtest_writel(global_qtest, 0xF441C128, 2);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D104) & 16, ==, 16);
     /* A frame outside both configured static and dynamic slot ranges is
      * rejected before it can become a pending transmission. */
     qtest_writel(global_qtest, 0xF441C134, 0);
