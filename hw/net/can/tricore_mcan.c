@@ -23,6 +23,8 @@ REG32(RXID, 0x18)
 REG32(RXDATAL, 0x1c)
 REG32(RXDATAH, 0x20)
 REG32(INT_ENABLE, 0x24)
+REG32(FIFO_STATUS, 0x28)
+REG32(FIFO_CLEAR, 0x2c)
 
 /* TC27D MultiCAN+ register locations (iLLD TC27D_UM_V2.2): Node 0 and
  * message object 0.  The compact registers above remain as a QEMU-friendly
@@ -146,6 +148,9 @@ static uint64_t tricore_mcan_read(void *opaque, hwaddr addr, unsigned size)
     if (addr == R_RXDATAL) {
         return s->regs[index];
     }
+    if (addr == R_FIFO_STATUS) {
+        return s->rx_fifo_count | (s->rx_pending ? BIT(8) : 0);
+    }
     if (addr == R_RXDATAH) {
         uint32_t value = s->regs[index];
         tricore_mcan_load_rx(s);
@@ -165,6 +170,10 @@ static void tricore_mcan_write(void *opaque, hwaddr addr, uint64_t value,
     }
     if (addr == R_STATUS) {
         s->regs[index] &= ~(uint32_t)value;
+    } else if (addr == R_FIFO_CLEAR && (value & 1)) {
+        s->rx_fifo_head = s->rx_fifo_tail = s->rx_fifo_count = 0;
+        s->rx_pending = false;
+        s->regs[R_STATUS / 4] &= ~R_STATUS_RX_PENDING_MASK;
     } else if (addr == R_INT_ENABLE || addr == R_CONTROL ||
                addr == R_TXID || addr == R_TXDATAL || addr == R_TXDATAH ||
                (addr >= R_MO0_AR && addr < R_MO0_AR + MCAN_OBJECTS * MO_STRIDE &&
