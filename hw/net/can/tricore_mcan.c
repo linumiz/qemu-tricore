@@ -27,6 +27,9 @@ REG32(INT_ENABLE, 0x24)
  * message object 0.  The compact registers above remain as a QEMU-friendly
  * smoke interface; these aliases let early iLLD code use documented offsets. */
 REG32(NODE0_CR, 0x200)
+REG32(NODE1_CR, 0x220)
+REG32(NODE2_CR, 0x240)
+REG32(NODE3_CR, 0x260)
 REG32(MO0_DATAL, 0x910)
 REG32(MO0_DATAH, 0x914)
 REG32(MO0_AR, 0x918)
@@ -41,7 +44,8 @@ static void tricore_mcan_update_irq(TriCoreMCANState *s)
 static bool tricore_mcan_can_receive(CanBusClientState *client)
 {
     TriCoreMCANState *s = container_of(client, TriCoreMCANState, bus_client);
-    return (s->regs[R_CONTROL / 4] & R_CONTROL_ENABLE_MASK) && !s->rx_pending;
+    return (s->regs[R_CONTROL / 4] & R_CONTROL_ENABLE_MASK ||
+            s->enabled_nodes) && !s->rx_pending;
 }
 
 static ssize_t tricore_mcan_receive(CanBusClientState *client,
@@ -128,10 +132,17 @@ static void tricore_mcan_write(void *opaque, hwaddr addr, uint64_t value,
         s->regs[R_TXDATAL / 4] = s->regs[R_MO0_DATAL / 4];
         s->regs[R_TXDATAH / 4] = s->regs[R_MO0_DATAH / 4];
         tricore_mcan_send(s);
-    } else if (addr == R_NODE0_CR) {
+    } else if (addr == R_NODE0_CR || addr == R_NODE1_CR ||
+               addr == R_NODE2_CR || addr == R_NODE3_CR) {
         /* INIT/CCE sequencing is intentionally collapsed to the enable bit
          * for this first register-oriented implementation. */
-        s->regs[R_CONTROL / 4] = value ? R_CONTROL_ENABLE_MASK : 0;
+        unsigned node = (addr - R_NODE0_CR) / 0x20;
+        s->regs[index] = value;
+        if (value) {
+            s->enabled_nodes |= 1u << node;
+        } else {
+            s->enabled_nodes &= ~(1u << node);
+        }
     }
     tricore_mcan_update_irq(s);
 }
@@ -181,6 +192,7 @@ static const VMStateDescription vmstate_tricore_mcan = {
         VMSTATE_UINT8(rx_frame.flags, TriCoreMCANState),
         VMSTATE_UINT8_ARRAY(rx_frame.data, TriCoreMCANState, 64),
         VMSTATE_BOOL(rx_pending, TriCoreMCANState),
+        VMSTATE_UINT8(enabled_nodes, TriCoreMCANState),
         VMSTATE_END_OF_LIST()
     },
 };

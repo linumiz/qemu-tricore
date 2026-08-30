@@ -16,6 +16,7 @@ struct TriCoreMCANState {
     uint32_t regs[0x2000 / 4];
     qemu_can_frame rx_frame;
     bool rx_pending;
+    uint8_t enabled_nodes;
 };
 
 #endif
