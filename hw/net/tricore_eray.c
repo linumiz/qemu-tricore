@@ -55,6 +55,18 @@
 #define ERAY_ACTION_STATIC 0x18c
 #define ERAY_ACTION_DYNAMIC 0x190
 
+/* CCEV bits used by the portable model.  These map to the public error/event
+ * classes; keeping them explicit makes invalid host requests observable in
+ * QTests without pretending to emulate undocumented PHY diagnostics. */
+#define CCEV_ILLEGAL_COMMAND BIT(0)
+#define CCEV_HEADER_ERROR    BIT(1)
+#define CCEV_CYCLE_START     BIT(2)
+#define CCEV_SLOT_ERROR      BIT(3)
+#define CCEV_FIFO_OVERRUN    BIT(4)
+#define CCEV_FIFO_CRITICAL   BIT(5)
+#define CCEV_FIFO_EMPTY      BIT(6)
+#define CCEV_UNLOCK_ERROR    BIT(7)
+
 /* Public register field masks (reserved bits read as zero and ignore writes). */
 #define ERAY_SUCC1_MASK 0x03ffffffu
 #define ERAY_SUCC2_MASK 0x03ffffffu
@@ -95,8 +107,13 @@ static void eray_scheduler_cb(void *opaque)
     if (s->ccsv == POC_NORMAL_ACTIVE) {
         s->cycle = (s->cycle + 1) % MAX(1, s->cycle_length);
         s->slot_status = (s->slot_status & 0x80000000) | (s->cycle << 16);
-        s->ccev |= BIT(2); /* cycle start event */
+        s->ccev |= CCEV_CYCLE_START;
         if (s->tx_pending && s->cycle == s->tx_due_cycle) {
+            /* A pending request is released only at its configured slot.  A
+             * single virtual timer represents the macrocycle; the slot marker
+             * keeps ordering deterministic while avoiding wall-clock timing. */
+            s->slot_status = (s->slot_status & 0xffff0000) |
+                             (s->tx_due_slot & 0x7ff);
             eray_deliver_frame(s, s->tx_frame_id, s->tx_frame);
             s->tx_pending = false;
         }
@@ -166,17 +183,28 @@ static void eray_commit_message(TriCoreERAYState *s)
     if (s->unlock_key != 0xa5) {
         /* The public message-handler sequence requires an unlock write before
          * a commit; expose legacy/direct commits as a protocol error. */
-        s->ccev |= BIT(7);
+        s->ccev |= CCEV_UNLOCK_ERROR;
         return;
     }
     s->unlock_key = 0;
     s->host_busy = 1;
     uint32_t payload_len = ldl_le_p(&s->msg_data[offset + 4]) & 0x7f;
-    if (!payload_len || payload_len > 64) {
+    uint32_t encoded_payload_len = payload_len;
+    if (!payload_len) {
         payload_len = 64;
     }
+    /* The emulated message RAM intentionally uses a compact public fixture
+     * header: word 0 is the 11-bit frame ID, word 1 the payload length, and
+     * word 2 carries null/sync/startup flags.  Reject IDs outside the public
+     * FlexRay range and lengths that cannot fit this 64-byte model. */
+    if ((frame_id & ~0x7ffu) || encoded_payload_len > sizeof(s->tx_frame)) {
+        s->ccev |= CCEV_HEADER_ERROR;
+        s->host_busy = 0;
+        eray_update_irq(s);
+        return;
+    }
     if (!(s->mbctrl & MBCTRL_COMMIT) || offset + 64 > sizeof(s->msg_data)) {
-        s->ccev |= BIT(1);
+        s->ccev |= CCEV_HEADER_ERROR;
         return;
     }
     /* The portable bus models a static-slot transfer at the programmed cycle.
@@ -186,7 +214,19 @@ static void eray_commit_message(TriCoreERAYState *s)
                      ((payload_len & 0x7f) << 8) |
                      ((s->mbctrl & MBCTRL_CHANNEL_B) ? BIT(31) : 0);
     if (s->guardian || !(s->channel_mask & ((s->mbctrl & MBCTRL_CHANNEL_B) ? 2 : 1))) {
-        s->ccev |= BIT(3); /* bus guardian/channel violation */
+        s->ccev |= CCEV_SLOT_ERROR; /* bus guardian/channel violation */
+        eray_update_irq(s);
+        return;
+    }
+    if (s->static_slots && frame_id <= s->static_slots) {
+        /* Static slots are valid only in the configured static prefix. */
+        s->tx_due_slot = frame_id;
+    } else if (frame_id >= s->dynamic_start) {
+        /* Dynamic frames are assigned a deterministic minislot marker. */
+        s->tx_due_slot = frame_id;
+    } else {
+        s->ccev |= CCEV_SLOT_ERROR;
+        s->host_busy = 0;
         eray_update_irq(s);
         return;
     }
@@ -200,7 +240,7 @@ static void eray_commit_message(TriCoreERAYState *s)
          * transmission occurs at the next configured virtual slot. */
         memcpy(s->tx_frame, &s->msg_data[offset], sizeof(s->tx_frame));
         s->tx_frame_id = frame_id;
-        s->tx_due_cycle = (s->cycle + 1) & 0x3f;
+        s->tx_due_cycle = (s->cycle + 1) % MAX(1u, s->cycle_length);
         s->tx_payload_len = payload_len;
         s->tx_pending = true;
         s->mbsc1 |= BIT(s->mbid & 31);
@@ -355,7 +395,7 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
         if (value & MBCTRL_FIFO_POP) {
             uint32_t count = (s->fifo_status >> 8) & 0xff;
             if (!count) {
-                s->ccev |= BIT(6); /* documented empty-FIFO access */
+                s->ccev |= CCEV_FIFO_EMPTY;
             } else {
                 count--;
                 s->fifo_status = (s->fifo_status & 0xff) | (count << 8);
@@ -438,7 +478,7 @@ static void eray_reset(DeviceState *dev)
     s->slot_filter = s->cycle_filter = 0;
     s->last_rx_id = s->last_rx_cycle = 0;
     s->last_rx_channel = 0;
-    s->sched_cfg = s->tx_frame_id = s->tx_due_cycle = 0;
+    s->sched_cfg = s->tx_frame_id = s->tx_due_cycle = s->tx_due_slot = 0;
     s->sched_period_ns = ERAY_CYCLE_NS;
     s->tx_pending = false;
     s->tx_payload_len = 0;
@@ -518,6 +558,7 @@ static const VMStateDescription vmstate_eray = {
         VMSTATE_UINT32(sched_period_ns, TriCoreERAYState),
         VMSTATE_UINT32(tx_frame_id, TriCoreERAYState),
         VMSTATE_UINT32(tx_due_cycle, TriCoreERAYState),
+        VMSTATE_UINT32(tx_due_slot, TriCoreERAYState),
         VMSTATE_UINT32(tx_payload_len, TriCoreERAYState),
         VMSTATE_BOOL(tx_pending, TriCoreERAYState),
         VMSTATE_UINT8_ARRAY(tx_frame, TriCoreERAYState, 64),

@@ -26,6 +26,11 @@
 #define TC4DX_SRC_ERAY0_INT1 721
 #define TC4DX_SRC_ERAY1_INT0 722
 #define TC4DX_SRC_ERAY1_INT1 723
+/* Generation-specific ERAY service-request table from public TC4x sources. */
+static const uint16_t tc4dx_eray_src[2][2] = {
+    { TC4DX_SRC_ERAY0_INT0, TC4DX_SRC_ERAY0_INT1 },
+    { TC4DX_SRC_ERAY1_INT0, TC4DX_SRC_ERAY1_INT1 },
+};
 
 static uint64_t tc4dx_cre_read(void *opaque, hwaddr offset, unsigned size)
 {
@@ -208,10 +213,10 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
         sysbus_mmio_map(SYS_BUS_DEVICE(dev), 1, eray_base[i] + 0x2000);
         sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0,
                            qdev_get_gpio_in_named(DEVICE(&s->ir), "irq",
-                                                  (i ? TC4DX_SRC_ERAY1_INT0 : TC4DX_SRC_ERAY0_INT0)));
+                                                  tc4dx_eray_src[i][0]));
         sysbus_connect_irq(SYS_BUS_DEVICE(dev), 1,
                            qdev_get_gpio_in_named(DEVICE(&s->ir), "irq",
-                                                  (i ? TC4DX_SRC_ERAY1_INT1 : TC4DX_SRC_ERAY0_INT1)));
+                                                  tc4dx_eray_src[i][1]));
     }
 }
 

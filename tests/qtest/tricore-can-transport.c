@@ -52,6 +52,11 @@ static void test_eray_profiles(void)
     qtest_start("-machine KIT_AURIX_TC397B_TRB");
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C100), ==, 1);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF0017100), ==, 1);
+    /* TC3x exposes ERAY0/1 INT0/INT1 through the generation-specific table. */
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0038000 + 160 * 4), !=, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0038000 + 161 * 4), !=, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0038000 + 162 * 4), !=, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0038000 + 163 * 4), !=, 0);
     qtest_writel(global_qtest, 0xF0017180, 10);
     qtest_writel(global_qtest, 0xF0017184, 20);
     qtest_writel(global_qtest, 0xF0017188, 32);
@@ -66,9 +71,19 @@ static void test_eray_profiles(void)
     qtest_writel(global_qtest, 0xF441C118, 3);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C100), ==, 0x0d);
     qtest_writel(global_qtest, 0xF441D118, 3);
+    /* Header validation rejects a payload that cannot fit the public 64-byte
+     * message-RAM fixture and reports the documented header error event. */
+    qtest_writel(global_qtest, 0xF441E000, 0x10);
+    qtest_writel(global_qtest, 0xF441E004, 65);
+    qtest_writel(global_qtest, 0xF441C124, 0);
+    qtest_writel(global_qtest, 0xF441C128, 2);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C104) & 2, ==, 2);
+    qtest_writel(global_qtest, 0xF441C104, 2);
     /* ERAY0 message RAM is at +0x2000; commit one buffer and observe it on
      * the second in-process node through NDAT/MBSC pending state. */
     qtest_writel(global_qtest, 0xF441E000, 0x123);
+    qtest_writel(global_qtest, 0xF441E004, 0);
     qtest_writel(global_qtest, 0xF441C124, 0);
     qtest_writel(global_qtest, 0xF441C128, 2); /* unlock */
     qtest_writel(global_qtest, 0xF441C128, 1); /* commit */
@@ -93,6 +108,15 @@ static void test_eray_profiles(void)
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D12c), ==, 0);
     qtest_clock_step(global_qtest, 1000);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D12c), !=, 0);
+    /* A frame outside both configured static and dynamic slot ranges is
+     * rejected before it can become a pending transmission. */
+    qtest_writel(global_qtest, 0xF441C134, 0);
+    qtest_writel(global_qtest, 0xF441C138, 100);
+    qtest_writel(global_qtest, 0xF441E000, 50);
+    qtest_writel(global_qtest, 0xF441C124, 0);
+    qtest_writel(global_qtest, 0xF441C128, 2);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C104) & 8, ==, 8);
     qtest_quit(global_qtest);
 }
 

@@ -252,6 +252,11 @@ static void tc27xd_soc_init_memory_mapping(DeviceState *dev_soc)
 /* ERAY0 interrupt lines from the public TC27x SRC layout. */
 #define TC27X_SRC_ERAY0_INT0    160
 #define TC27X_SRC_ERAY0_INT1    161
+/* Generation-specific ERAY service-request table from the public TC27x
+ * interrupt-router documentation; indexes are [instance][INT0/INT1]. */
+static const uint16_t tc27x_eray_src[1][2] = {
+    { TC27X_SRC_ERAY0_INT0, TC27X_SRC_ERAY0_INT1 },
+};
 
 static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
 {
@@ -388,9 +393,9 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_connect_irq(SYS_BUS_DEVICE(s->eth), 0,
         qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", TC27X_SRC_ETH));
     sysbus_connect_irq(SYS_BUS_DEVICE(s->eray), 0,
-        qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", TC27X_SRC_ERAY0_INT0));
+        qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", tc27x_eray_src[0][0]));
     sysbus_connect_irq(SYS_BUS_DEVICE(s->eray), 1,
-        qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", TC27X_SRC_ERAY0_INT1));
+        qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", tc27x_eray_src[0][1]));
 
     memory_region_add_subregion_overlap(sysmem, sc->memmap[TC27XD_SFR].base,
                                         &s->sfr->iomem, -1);
