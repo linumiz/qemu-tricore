@@ -35,6 +35,7 @@ REG32(RX_LEN, 0x3c)
  * message object 0.  The compact registers above remain as a QEMU-friendly
  * smoke interface; these aliases let early iLLD code use documented offsets. */
 REG32(NODE0_CR, 0x200)
+REG32(NODE0_BTR, 0x210)
 REG32(NODE1_CR, 0x220)
 REG32(NODE2_CR, 0x240)
 REG32(NODE3_CR, 0x260)
@@ -161,7 +162,22 @@ static void tricore_mcan_send(TriCoreMCANState *s)
     if (s->regs[R_CONTROL / 4] & R_CONTROL_LOOPBACK_MASK) {
         tricore_mcan_receive(&s->bus_client, &frame, 1);
     } else if (s->canbus) {
-        can_bus_client_send(&s->bus_client, &frame, 1);
+        if (s->regs[R_TXCTRL / 4] & BIT(3)) {
+            /* QEMU-specific timing mode turns the documented BTR fields into
+             * a virtual transfer delay; atomic mode remains the default for
+             * compatibility with existing CAN devices. */
+            uint32_t btr = s->regs[R_NODE0_BTR / 4];
+            uint32_t brp = (btr & 0x3f) + 1;
+            uint32_t tseg1 = ((btr >> 8) & 0xff) + 1;
+            uint32_t tseg2 = ((btr >> 16) & 0x0f) + 1;
+            uint32_t bitrate = 100000000u / (brp * (1 + tseg1 + tseg2));
+            uint32_t bits = 47 + 8 * can_dlc2len(frame.can_dlc);
+            uint64_t delay_ns = bitrate ? ((uint64_t)bits * 1000000000ull) /
+                                             bitrate : 0;
+            can_bus_client_send_timed(&s->bus_client, &frame, 1, delay_ns);
+        } else {
+            can_bus_client_send(&s->bus_client, &frame, 1);
+        }
     }
     s->regs[R_STATUS / 4] |= R_STATUS_TX_COMPLETE_MASK;
     tricore_mcan_update_irq(s);
