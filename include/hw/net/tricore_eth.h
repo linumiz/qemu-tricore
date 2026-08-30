@@ -11,6 +11,7 @@
 
 #include "hw/core/sysbus.h"
 #include "net/net.h"
+#include "hw/dma/tricore_dma.h"
 
 #define TYPE_TRICORE_ETH "tricore-eth"
 #define TYPE_TRICORE_GETH "tricore-geth"
@@ -23,6 +24,7 @@ typedef struct TriCoreETHState {
     qemu_irq irq;
     NICState *nic;
     NICConf conf;
+    TriCoreDMAState *dma;
     uint32_t control, status, int_enable, int_status;
     uint32_t tx_desc, rx_desc, mdio_addr, mdio_data;
     uint32_t mac_low, mac_high;

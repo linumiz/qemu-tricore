@@ -91,6 +91,11 @@ static void tricore_mcan_load_rx(TriCoreMCANState *s)
     s->regs[R_RX_LEN / 4] = s->rx_len | (s->rx_fd ? BIT(8) : 0) |
                              (s->rx_brs ? BIT(9) : 0);
     s->regs[R_STATUS / 4] |= R_STATUS_RX_PENDING_MASK;
+    /* TC4x DRE request 16 is emitted when an accepted RX message reaches the
+     * message-object/FIFO state, allowing the SoC DMA engine to drain it. */
+    if (s->dma) {
+        tricore_dma_request(s->dma, TRICORE_DMA_REQ_MCAN0);
+    }
 }
 
 static bool tricore_mcan_can_receive(CanBusClientState *client)
@@ -232,6 +237,9 @@ static void tricore_mcan_send(TriCoreMCANState *s)
         }
     }
     s->regs[R_STATUS / 4] |= R_STATUS_TX_COMPLETE_MASK;
+    if (s->dma) {
+        tricore_dma_request(s->dma, TRICORE_DMA_REQ_MCAN0);
+    }
     tricore_mcan_update_irq(s);
 }
 
@@ -453,6 +461,8 @@ static const VMStateDescription vmstate_tricore_mcan = {
 static Property tricore_mcan_props[] = {
     DEFINE_PROP_LINK("canbus", TriCoreMCANState, canbus, TYPE_CAN_BUS,
                      CanBusState *),
+    DEFINE_PROP_LINK("dma", TriCoreMCANState, dma, TYPE_TRICORE_DMA,
+                     TriCoreDMAState *),
 };
 
 static void tricore_mcan_class_init(ObjectClass *klass, const void *data)

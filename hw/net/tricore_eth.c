@@ -84,6 +84,9 @@ static ssize_t tricore_eth_receive(NetClientState *nc, const uint8_t *buf,
     s->rx_pos = 0;
     s->status |= STAT_RX_AVAIL;
     s->int_status |= INT_RX;
+    if (s->dma) {
+        tricore_dma_request(s->dma, TRICORE_DMA_REQ_ETH);
+    }
     tricore_eth_update_irq(s);
     return len;
 }
@@ -94,6 +97,9 @@ static void tricore_eth_tx(TriCoreETHState *s)
         qemu_send_packet(qemu_get_queue(s->nic), s->tx_buf, s->tx_len);
         s->tx_len = 0;
         s->int_status |= INT_TX;
+        if (s->dma) {
+            tricore_dma_request(s->dma, TRICORE_DMA_REQ_ETH);
+        }
         tricore_eth_update_irq(s);
     }
 }
@@ -128,6 +134,9 @@ static void tricore_eth_tx_descriptor(TriCoreETHState *s)
                      MEMTXATTRS_UNSPECIFIED);
     s->tx_desc = end ? s->tx_desc : s->tx_desc + 16;
     s->int_status |= INT_TX;
+    if (s->dma) {
+        tricore_dma_request(s->dma, TRICORE_DMA_REQ_ETH);
+    }
     tricore_eth_update_irq(s);
 }
 
@@ -151,6 +160,9 @@ static bool tricore_eth_rx_descriptor(TriCoreETHState *s,
                      MEMTXATTRS_UNSPECIFIED);
     s->rx_desc = end ? s->rx_desc : s->rx_desc + 16;
     s->int_status |= INT_RX;
+    if (s->dma) {
+        tricore_dma_request(s->dma, TRICORE_DMA_REQ_ETH);
+    }
     tricore_eth_update_irq(s);
     return true;
 }
@@ -262,7 +274,11 @@ static void tricore_eth_realize(DeviceState *dev, Error **errp)
     qemu_format_nic_info_str(qemu_get_queue(s->nic), s->conf.macaddr.a);
 }
 
-static const Property tricore_eth_props[] = { DEFINE_NIC_PROPERTIES(TriCoreETHState, conf) };
+static const Property tricore_eth_props[] = {
+    DEFINE_NIC_PROPERTIES(TriCoreETHState, conf),
+    DEFINE_PROP_LINK("dma", TriCoreETHState, dma, TYPE_TRICORE_DMA,
+                     TriCoreDMAState *),
+};
 static const VMStateDescription vmstate_tricore_eth = {
     .name = TYPE_TRICORE_ETH, .version_id = 1, .minimum_version_id = 1,
     .fields = (const VMStateField[]) {

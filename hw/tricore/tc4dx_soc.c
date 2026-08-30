@@ -166,6 +166,8 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
     };
     for (i = 0; i < TC4DX_MAX_MCAN; i++) {
         dev = DEVICE(&s->mcan[i]);
+        object_property_set_link(OBJECT(dev), "dma", OBJECT(&s->dma),
+                                 &error_abort);
         if (s->canbus) {
             object_property_set_link(OBJECT(dev), "canbus",
                                      OBJECT(s->canbus), &error_abort);
@@ -186,6 +188,8 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
 
     /* The TC4x XGMAC/EDMA front-end shares the common deterministic model. */
     dev = DEVICE(&s->eth);
+    object_property_set_link(OBJECT(dev), "dma", OBJECT(&s->dma),
+                             &error_abort);
     if (!sysbus_realize(SYS_BUS_DEVICE(dev), errp)) {
         return;
     }
@@ -195,6 +199,8 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
 
     /* TC4Dx LETH0 has a separate register window and service request group. */
     dev = DEVICE(&s->leth);
+    object_property_set_link(OBJECT(dev), "dma", OBJECT(&s->dma),
+                             &error_abort);
     if (!sysbus_realize(SYS_BUS_DEVICE(dev), errp)) {
         return;
     }
