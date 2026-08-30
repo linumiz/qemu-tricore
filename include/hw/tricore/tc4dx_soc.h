@@ -42,6 +42,7 @@ typedef struct TC4DXSoCState {
     TriCoreASCLINState asclin[TC4DX_MAX_ASCLIN];
     TriCoreMCANState mcan[TC4DX_MAX_MCAN];
     TriCoreETHState eth;
+    TriCoreETHState leth;
     CanBusState *canbus;
     MemoryRegion cre_region;
     uint32_t cre_control;

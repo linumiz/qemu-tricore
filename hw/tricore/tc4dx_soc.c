@@ -180,6 +180,15 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, 0xF9000000);
     sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0,
                        qdev_get_gpio_in_named(DEVICE(&s->ir), "irq", 700));
+
+    /* TC4Dx LETH0 has a separate register window and service request group. */
+    dev = DEVICE(&s->leth);
+    if (!sysbus_realize(SYS_BUS_DEVICE(dev), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, 0xF9400000);
+    sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0,
+                       qdev_get_gpio_in_named(DEVICE(&s->ir), "irq", 710));
 }
 
 static void tc4dx_soc_init(Object *obj)
@@ -203,7 +212,8 @@ static void tc4dx_soc_init(Object *obj)
         object_initialize_child(obj, name, &s->mcan[i], TYPE_TRICORE_MCAN);
         g_free(name);
     }
-    object_initialize_child(obj, "eth", &s->eth, TYPE_TRICORE_ETH);
+    object_initialize_child(obj, "eth", &s->eth, TYPE_TRICORE_GETH);
+    object_initialize_child(obj, "leth", &s->leth, TYPE_TRICORE_LETH);
 
     s->fosc = qdev_init_clock_in(DEVICE(s), "fosc", NULL, NULL, 0);
 }
