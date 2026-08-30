@@ -320,6 +320,7 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     for (unsigned i = 0; i < 3; i++) {
         s->mcan[i] = TRICORE_MCAN(object_new(TYPE_TRICORE_MCAN));
     }
+    s->eth = TRICORE_ETH(object_new(TYPE_TRICORE_ETH));
 
     /* Parent all devices so sysbus_realize_and_unref does not free them */
     object_property_add_child(OBJECT(dev_soc), "irbus", OBJECT(s->irbus));
@@ -340,6 +341,7 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
                                   OBJECT(s->mcan[i]));
         g_free(name);
     }
+    object_property_add_child(OBJECT(dev_soc), "eth", OBJECT(s->eth));
 
     /* IR properties */
     qdev_prop_set_bit(DEVICE(s->irbus), "tc4x-mode", false);
@@ -395,6 +397,7 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     for (unsigned i = 0; i < 3; i++) {
         sysbus_realize_and_unref(SYS_BUS_DEVICE(s->mcan[i]), &error_fatal);
     }
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->eth), &error_fatal);
     for (unsigned i = 0; i < 11; i++) {
         DeviceState *extra = DEVICE(s->asclin_extra[i]);
         qdev_prop_set_chr(extra, "chardev", serial_hd(i + 1));
@@ -473,6 +476,9 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
                                        176 + i * 16 + irq));
         }
     }
+    memory_region_add_subregion(sysmem, 0xF001D000, &s->eth->iomem);
+    sysbus_connect_irq(SYS_BUS_DEVICE(s->eth), 0,
+        qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", 175));
     for (unsigned i = 0; i < 11; i++) {
         memory_region_add_subregion(sysmem,
             sc->memmap[TC39XB_ASCLIN].base + 0x200 * (i + 1),

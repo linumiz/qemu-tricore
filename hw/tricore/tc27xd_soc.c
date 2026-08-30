@@ -266,6 +266,7 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     s->stm = TRICORE_STM(object_new(TYPE_TRICORE_STM));
     s->sfr = TRICORE_SFR(object_new(TYPE_TRICORE_SFR));
     s->mcan = TRICORE_MCAN(object_new(TYPE_TRICORE_MCAN));
+    s->eth = TRICORE_ETH(object_new(TYPE_TRICORE_ETH));
 
     object_property_add_child(OBJECT(dev_soc), "irbus", OBJECT(s->irbus));
     object_property_add_child(OBJECT(dev_soc), "asclin", OBJECT(s->asclin));
@@ -280,6 +281,7 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     object_property_add_child(OBJECT(dev_soc), "stm", OBJECT(s->stm));
     object_property_add_child(OBJECT(dev_soc), "sfr", OBJECT(s->sfr));
     object_property_add_child(OBJECT(dev_soc), "mcan", OBJECT(s->mcan));
+    object_property_add_child(OBJECT(dev_soc), "eth", OBJECT(s->eth));
 
     qdev_prop_set_bit(DEVICE(s->irbus), "tc4x-mode", false);
     qdev_prop_set_bit(DEVICE(s->irbus), "tc27x-mode", true);
@@ -323,6 +325,7 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->virt), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->asclin), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->mcan), &error_fatal);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->eth), &error_fatal);
     for (unsigned i = 0; i < 3; i++) {
         DeviceState *extra = DEVICE(s->asclin_extra[i]);
         qdev_prop_set_chr(extra, "chardev", serial_hd(i + 1));
@@ -375,6 +378,10 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
                                    TC27X_SRC_MCAN_BASE + i));
     }
 
+    /* The TC27D GMAC-UNIV exposes one aggregated Ethernet service request. */
+    sysbus_connect_irq(SYS_BUS_DEVICE(s->eth), 0,
+        qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", TC27X_SRC_ETH));
+
     memory_region_add_subregion_overlap(sysmem, sc->memmap[TC27XD_SFR].base,
                                         &s->sfr->iomem, -1);
     memory_region_add_subregion(sysmem, sc->memmap[TC27XD_ASCLIN].base,
@@ -383,6 +390,7 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
                                 &s->mcan->iomem);
     memory_region_add_subregion(sysmem, sc->memmap[TC27XD_MCAN].base + 0x3000,
                                 &s->mcan->msg_ram);
+    memory_region_add_subregion(sysmem, 0xF001D000, &s->eth->iomem);
     for (unsigned i = 0; i < 3; i++) {
         memory_region_add_subregion(sysmem,
             sc->memmap[TC27XD_ASCLIN].base + 0x200 * (i + 1),

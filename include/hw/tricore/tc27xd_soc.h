@@ -33,6 +33,7 @@
 #include "hw/timer/tricore_stm.h"
 #include "hw/char/tricore_asclin.h"
 #include "hw/net/tricore_mcan.h"
+#include "hw/net/tricore_eth.h"
 #include "hw/tricore/tc_soc.h"
 
 #define TYPE_TC27XD_SOC ("tc27xd-soc")
@@ -98,6 +99,7 @@ typedef struct TC27XDSoCState {
     TriCoreASCLINState *asclin;
     TriCoreASCLINState *asclin_extra[3];
     TriCoreMCANState *mcan;
+    TriCoreETHState *eth;
     CanBusState *canbus;
     TriCoreSFRState *sfr;
 

@@ -171,6 +171,15 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
                                        700 + i * 16 + irq));
         }
     }
+
+    /* The TC4x XGMAC/EDMA front-end shares the common deterministic model. */
+    dev = DEVICE(&s->eth);
+    if (!sysbus_realize(SYS_BUS_DEVICE(dev), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, 0xF9000000);
+    sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0,
+                       qdev_get_gpio_in_named(DEVICE(&s->ir), "irq", 700));
 }
 
 static void tc4dx_soc_init(Object *obj)
@@ -194,6 +203,7 @@ static void tc4dx_soc_init(Object *obj)
         object_initialize_child(obj, name, &s->mcan[i], TYPE_TRICORE_MCAN);
         g_free(name);
     }
+    object_initialize_child(obj, "eth", &s->eth, TYPE_TRICORE_ETH);
 
     s->fosc = qdev_init_clock_in(DEVICE(s), "fosc", NULL, NULL, 0);
 }
