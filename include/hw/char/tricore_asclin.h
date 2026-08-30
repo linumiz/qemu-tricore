@@ -17,6 +17,7 @@
 #include "hw/core/qdev-properties.h"
 #include "chardev/char-fe.h"
 #include "hw/core/ptimer.h"
+#include "qemu/timer.h"
 
 enum {
     STAT_THRE = (1 << 0), STAT_RX_EVT = (1 << 1), STAT_TX_EVT = (1 << 2),
@@ -58,6 +59,7 @@ enum {
 #define MASK_FLAGS_RFL   (1u << 28)
 #define MASK_FLAGS_TFO   (1u << 30)
 #define MASK_FLAGS_TFL   (1u << 31)
+#define MASK_FLAGS_LIN_BREAK MASK_FLAGS_BD
 
 #define MASK_RXFIFOCON_FLUSH 0x1
 #define MASK_RXFIFOCON_ENI   0x2
@@ -86,6 +88,7 @@ enum {
 
 #define ASCLIN_R_MAX 27
 #define ASCLIN_RX_BUFFER 8192
+#define ASCLIN_RX_FIFO_MASK (ASCLIN_HW_FIFO_DEPTH - 1)
 
 #define TYPE_TRICORE_ASCLIN "tricore_asclin"
 #define TRICORE_ASCLIN(obj) \
@@ -104,7 +107,19 @@ struct TriCoreASCLINState {
     uint8_t rxbuf[ASCLIN_RX_BUFFER];
     uint32_t rxbufwriteidx;
     uint32_t rxbufreadidx;
+    bool block_tx_enabled;
+    bool lin_gateway;
+    uint8_t lin_gateway_rx_type;
+    bool lin_sync_seen;
+    bool lin_pid_seen;
+    uint8_t lin_data_count;
+    uint16_t lin_checksum_sum;
+    uint8_t lin_response_length;
+    bool lin_checksum_enhanced;
+    char *lin_schedule;
     ptimer_state *ptimer;
+    QEMUTimer *lin_timeout_timer;
+    bool lin_timeout_response;
     QEMUBH *bh;
 };
 typedef struct TriCoreASCLINState TriCoreASCLINState;

@@ -32,6 +32,13 @@
 #include "hw/intc/tricore_ir.h"
 #include "hw/timer/tricore_stm.h"
 #include "hw/char/tricore_asclin.h"
+#include "hw/net/tricore_mcan.h"
+#include "hw/net/tricore_eth.h"
+#include "hw/net/tricore_eray.h"
+#include "hw/dma/tricore_dma.h"
+#include "hw/gpio/tricore_port.h"
+#include "hw/intc/tricore_ici.h"
+#include "hw/misc/tricore_gate.h"
 #include "hw/tricore/tc_soc.h"
 
 #define TYPE_TC39XB_SOC ("tc39xb-soc")
@@ -48,6 +55,15 @@ typedef struct TC39XBSoCCPUMemState {
     MemoryRegion dlmu_u;
 
 } TC39XBSoCCPUMemState;
+
+typedef struct TC39XBCPUSFRState {
+    struct TC39XBSoCState *soc;
+    unsigned id;
+    MemoryRegion region;
+    uint32_t boot_pc;
+    uint32_t bootcon;
+    uint32_t syscon;
+} TC39XBCPUSFRState;
 
 #define TC39XB_MEMDEV_CPU(n) \
     TC39XB_DSPR##n,      \
@@ -85,7 +101,7 @@ typedef struct TC39XBSoCState {
     SysBusDevice parent_obj;
 
     /*< public >*/
-    TriCoreCPU cpu;
+    TriCoreCPU cpus[6];
 
     MemoryRegion dsprX;
     MemoryRegion psprX;
@@ -96,6 +112,7 @@ typedef struct TC39XBSoCState {
     TC39XBSoCCPUMemState cpu3mem;
     TC39XBSoCCPUMemState cpu4mem;
     TC39XBSoCCPUMemState cpu5mem;
+    TC39XBCPUSFRState cpu_sfr[6];
     TC39XBSoCFlashMemState flashmem;
     
     TriCoreIRState *irbus;
@@ -104,6 +121,15 @@ typedef struct TC39XBSoCState {
     TriCoreSTMState *stm;
     TriCoreSFRState *sfr;
     TriCoreASCLINState *asclin;
+    TriCoreASCLINState *asclin_extra[11];
+    TriCoreMCANState *mcan[3];
+    TriCoreETHState *eth;
+    TriCoreERAYState *eray[2];
+    TriCoreDMAState *dma;
+    TriCorePortState *port;
+    TriCoreICIState *ici;
+    TriCoreGateState *gate;
+    CanBusState *canbus;
 
     qemu_irq irq[256];
     qemu_irq *cpu_irq;

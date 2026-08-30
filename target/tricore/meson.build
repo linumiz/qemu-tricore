@@ -7,6 +7,7 @@ tricore_ss.add(files(
   'op_helper.c',
   'translate.c',
   'debug-semihosting.c',
+  'machine.c',
 ))
 tricore_ss.add(zlib)
 

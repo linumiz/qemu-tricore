@@ -14,3 +14,6 @@ xlnx_canfd_rx_fifo_filter_reject(char *path, uint32_t id, uint8_t dlc) "%s: Fram
 xlnx_canfd_rx_data(char *path, uint32_t id, uint8_t dlc, uint8_t flags) "%s: Frame: ID: 0x%08x DLC: 0x%02x CANFD Flag: 0x%02x"
 xlnx_canfd_tx_data(char *path, uint32_t id, uint8_t dlc, uint8_t flgas) "%s: Frame: ID: 0x%08x DLC: 0x%02x CANFD Flag: 0x%02x"
 xlnx_canfd_reset(char *path, uint32_t val) "%s: Resetting controller with value = 0x%08x"
+# tricore_mcan.c
+tricore_mcan_unimplemented(uint64_t offset, uint64_t value, int is_write) "unimplemented offset=0x%" PRIx64 " value=0x%" PRIx64 " write=%d"
+tricore_mcan_dma_request(uint32_t request, int receive) "DMA request=%u receive=%d"

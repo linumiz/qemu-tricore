@@ -20,20 +20,43 @@
 #include "hw/intc/tricore_ir.h"
 #include "hw/timer/tricore_stm.h"
 #include "hw/char/tricore_asclin.h"
+#include "hw/net/tricore_mcan.h"
+#include "hw/net/tricore_eray.h"
+#include "hw/dma/tricore_dma.h"
+#include "hw/gpio/tricore_port.h"
+#include "hw/intc/tricore_ici.h"
+#include "hw/misc/tricore_gate.h"
+#include "hw/net/tricore_eth.h"
 #include "hw/tricore/tc_soc.h"
 
 #define TYPE_TC4DX_SOC ("tc4dx-soc")
+#define TC4DX_MAX_CPUS 6
+#define TC4DX_MAX_ASCLIN 28
+#define TC4DX_MAX_MCAN 5
 OBJECT_DECLARE_TYPE(TC4DXSoCState, TC4DXSoCClass, TC4DX_SOC)
 
 
 typedef struct TC4DXSoCState {
     SysBusDevice parent_obj;
 
-    TC4xCPUState cpus[1];
+    TC4xCPUState cpus[TC4DX_MAX_CPUS];
+    MemoryRegion cpu_sfr_alias[TC4DX_MAX_CPUS];
 
     TriCoreIRState ir;
     TC4xClockState clock;
-    TriCoreASCLINState asclin[1];
+    TriCoreASCLINState asclin[TC4DX_MAX_ASCLIN];
+    TriCoreMCANState mcan[TC4DX_MAX_MCAN];
+    TriCoreETHState eth;
+    TriCoreETHState leth;
+    TriCoreERAYState eray[2];
+    TriCoreDMAState dma;
+    TriCorePortState port;
+    TriCoreICIState ici;
+    TriCoreGateState gate;
+    CanBusState *canbus;
+    MemoryRegion cre_region;
+    uint32_t cre_control;
+    uint32_t cre_status;
 
     Clock *fosc;
 } TC4DXSoCState;

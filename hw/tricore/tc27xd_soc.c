@@ -30,6 +30,73 @@
 #include "hw/tricore/tc27xd_soc.h"
 #include "hw/tricore/triboard.h"
 
+static uint64_t tc27x_cpu_ctrl_read(void *opaque, hwaddr offset, unsigned size)
+{
+    struct TC27XCPUControl *c = opaque;
+    if (offset == 0x1FE08) return c->pc;
+    if (offset == 0x1FD00) return c->dbgsr;
+    return 0;
+}
+
+static void tc27x_cpu_ctrl_write(void *opaque, hwaddr offset,
+                                 uint64_t value, unsigned size)
+{
+    struct TC27XCPUControl *c = opaque;
+    if (offset == 0x1FE08) {
+        c->pc = value << 1;
+    } else if (offset == 0x1FD00) {
+        c->dbgsr = value;
+        if (c->id > 0 && (value & 3) == 2) {
+            CPUState *cs = CPU(&c->soc->cpus[c->id]);
+            c->soc->cpus[c->id].env.PC = c->pc;
+            cs->halted = 0;
+            cpu_resume(cs);
+        }
+    }
+}
+
+static const MemoryRegionOps tc27x_cpu_ctrl_ops = {
+    .read = tc27x_cpu_ctrl_read,
+    .write = tc27x_cpu_ctrl_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid.min_access_size = 1,
+    .valid.max_access_size = 4,
+};
+
+static void tc27x_pmcsr_write(void *opaque, hwaddr offset,
+                              uint64_t value, unsigned size)
+{
+    TC27XDSoCState *s = opaque;
+    unsigned id = offset >> 2;
+    if (id < 3 && id < TC27XD_SOC_GET_CLASS(s)->num_cpus && !(value & 3) && id > 0) {
+        CPUState *cs = CPU(&s->cpus[id]);
+        cs->halted = 0;
+        cpu_resume(cs);
+    }
+}
+
+static uint64_t tc27x_pmcsr_read(void *opaque, hwaddr offset, unsigned size)
+{
+    unsigned id = offset >> 2;
+    TC27XDSoCState *s = opaque;
+    return (id < 3 && id < TC27XD_SOC_GET_CLASS(s)->num_cpus && id > 0) ? 1 : 0;
+}
+
+static const MemoryRegionOps tc27x_pmcsr_ops = {
+    .read = tc27x_pmcsr_read,
+    .write = tc27x_pmcsr_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid.min_access_size = 1,
+    .valid.max_access_size = 4,
+};
+
+static void tc27x_dma_isp_sink(void *opaque, int n, int level)
+{
+    /* TC277 exposes a fourth service-provider slot for DMA.  No DMA device
+     * is present yet, but keeping the slot connected prevents it from being
+     * confused with a CPU ISP and preserves the documented topology. */
+}
+
 const MemmapEntry tc27xd_soc_memmap[] = {
     [TC27XD_DSPR2]     = { 0x50000000,            120 * KiB },
     [TC27XD_DCACHE2]   = { 0x5001E000,              8 * KiB },
@@ -69,6 +136,8 @@ const MemmapEntry tc27xd_soc_memmap[] = {
     [TC27XD_SFR]       = { 0xF0000000,                  0x0 },
     [TC27XD_STM]       = { 0xF0000000,                  0x0 },
     [TC27XD_ASCLIN]    = { 0xF0000600,                  0x0 },
+    /* TC27D iLLD/User Manual: MODULE_CAN at F0018000. */
+    [TC27XD_MCAN]      = { 0xF0018000,              0x100 },
     [TC27XD_SCU]       = { 0xF0036000,                  0x0 },
     [TC27XD_IRBUS]     = { 0xF0038000,                  0x0 },
 };
@@ -120,18 +189,22 @@ static void tc27xd_soc_init_memory_mapping(DeviceState *dev_soc)
     TC27XDSoCCPUMemState *c2 = &s->cpu2mem;
     TC27XDSoCFlashMemState *f = &s->flashmem;
 
-    make_ram(&c0->dspr, "CPU0.DSPR", map[TC27XD_DSPR0].base, map[TC27XD_DSPR0].size);
-    make_ram(&c0->pspr, "CPU0.PSPR", map[TC27XD_PSPR0].base, map[TC27XD_PSPR0].size);
-    make_ram(&c1->dspr, "CPU1.DSPR", map[TC27XD_DSPR1].base, map[TC27XD_DSPR1].size);
-    make_ram(&c1->pspr, "CPU1.PSPR", map[TC27XD_PSPR1].base, map[TC27XD_PSPR1].size);
-    make_ram(&c2->dspr, "CPU2.DSPR", map[TC27XD_DSPR2].base, map[TC27XD_DSPR2].size);
-    make_ram(&c2->pspr, "CPU2.PSPR", map[TC27XD_PSPR2].base, map[TC27XD_PSPR2].size);
+    make_ram(&c0->dspr, "CPU0.DSPR", map[TC27XD_DSPR0].base, sc->dspr_size[0]);
+    make_ram(&c0->pspr, "CPU0.PSPR", map[TC27XD_PSPR0].base, sc->pspr_size[0]);
+    make_ram(&c1->dspr, "CPU1.DSPR", map[TC27XD_DSPR1].base, sc->dspr_size[1]);
+    make_ram(&c1->pspr, "CPU1.PSPR", map[TC27XD_PSPR1].base, sc->pspr_size[1]);
+    if (sc->num_cpus > 2) {
+        make_ram(&c2->dspr, "CPU2.DSPR", map[TC27XD_DSPR2].base, sc->dspr_size[2]);
+        make_ram(&c2->pspr, "CPU2.PSPR", map[TC27XD_PSPR2].base, sc->pspr_size[2]);
+    }
 
     /* TODO: Control Cache mapping with Memory Test Unit (MTU) */
-    make_ram(&c2->dcache, "CPU2.DCACHE", map[TC27XD_DCACHE2].base, map[TC27XD_DCACHE2].size);
-    make_ram(&c2->dtag,   "CPU2.DTAG", map[TC27XD_DTAG2].base, map[TC27XD_DTAG2].size);
-    make_ram(&c2->pcache, "CPU2.PCACHE", map[TC27XD_PCACHE2].base, map[TC27XD_PCACHE2].size);
-    make_ram(&c2->ptag,   "CPU2.PTAG", map[TC27XD_PTAG2].base, map[TC27XD_PTAG2].size);
+    if (sc->num_cpus > 2) {
+        make_ram(&c2->dcache, "CPU2.DCACHE", map[TC27XD_DCACHE2].base, map[TC27XD_DCACHE2].size);
+        make_ram(&c2->dtag,   "CPU2.DTAG", map[TC27XD_DTAG2].base, map[TC27XD_DTAG2].size);
+        make_ram(&c2->pcache, "CPU2.PCACHE", map[TC27XD_PCACHE2].base, map[TC27XD_PCACHE2].size);
+        make_ram(&c2->ptag,   "CPU2.PTAG", map[TC27XD_PTAG2].base, map[TC27XD_PTAG2].size);
+    }
     make_ram(&c1->dcache, "CPU1.DCACHE", map[TC27XD_DCACHE1].base, map[TC27XD_DCACHE1].size);
     make_ram(&c1->dtag,   "CPU1.DTAG", map[TC27XD_DTAG1].base, map[TC27XD_DTAG1].size);
     make_ram(&c1->pcache, "CPU1.PCACHE", map[TC27XD_PCACHE1].base, map[TC27XD_PCACHE1].size);
@@ -146,8 +219,10 @@ static void tc27xd_soc_init_memory_mapping(DeviceState *dev_soc)
     make_alias(&s->psprX, "LOCAL.PSPR", &c0->pspr, map[TC27XD_PSPRX].base);
     make_alias(&s->dsprX, "LOCAL.DSPR", &c0->dspr, map[TC27XD_DSPRX].base);
 
-    make_ram(&f->pflash0_c, "PF0", map[TC27XD_PFLASH0_C].base, map[TC27XD_PFLASH0_C].size);
-    make_ram(&f->pflash1_c, "PF1", map[TC27XD_PFLASH1_C].base, map[TC27XD_PFLASH1_C].size);
+    make_ram(&f->pflash0_c, "PF0", map[TC27XD_PFLASH0_C].base, sc->pflash0_size);
+    if (sc->pflash1_size) {
+        make_ram(&f->pflash1_c, "PF1", map[TC27XD_PFLASH1_C].base, sc->pflash1_size);
+    }
     make_ram(&f->dflash0,   "DF0", map[TC27XD_DFLASH0].base, map[TC27XD_DFLASH0].size);
     make_ram(&f->dflash1,   "DF1", map[TC27XD_DFLASH1].base, map[TC27XD_DFLASH1].size);
     make_ram(&f->olda_c,    "OLDA", map[TC27XD_OLDA_C].base, map[TC27XD_OLDA_C].size);
@@ -156,17 +231,32 @@ static void tc27xd_soc_init_memory_mapping(DeviceState *dev_soc)
     make_ram(&f->emem_c,    "EMEM", map[TC27XD_EMEM_C].base, map[TC27XD_EMEM_C].size);
 
     make_alias(&f->pflash0_u, "PF0.U",    &f->pflash0_c, map[TC27XD_PFLASH0_U].base);
-    make_alias(&f->pflash1_u, "PF1.U",    &f->pflash1_c, map[TC27XD_PFLASH1_U].base);
+    if (sc->pflash1_size) {
+        make_alias(&f->pflash1_u, "PF1.U",    &f->pflash1_c, map[TC27XD_PFLASH1_U].base);
+    }
     make_alias(&f->olda_u,    "OLDA.U",   &f->olda_c, map[TC27XD_OLDA_U].base);
     make_alias(&f->brom_u,    "BROM.U",   &f->brom_c, map[TC27XD_BROM_U].base);
     make_alias(&f->lmuram_u,  "LMURAM.U", &f->lmuram_c, map[TC27XD_LMURAM_U].base);
 }
 
-/* TC2x/TC3x SRC node indices (byte offset into SRC space / 4) */
-#define TC27X_SRC_STM0_SR0      0xC0
-#define TC27X_SRC_ASCLIN0_TX    0x14
-#define TC27X_SRC_ASCLIN0_RX    0x15
-#define TC27X_SRC_ASCLIN0_ERR   0x16
+/* TC277 SRC offsets from MODULE_SRC (F0038000), converted to SRN indices. */
+#define TC27X_SRC_STM0_SR0      103 /* F0038490 */
+#define TC27X_SRC_ASCLIN0_TX    9   /* F0038080 */
+#define TC27X_SRC_ASCLIN0_RX    10  /* F0038084 */
+#define TC27X_SRC_ASCLIN0_ERR   11  /* F0038088 */
+
+/* Reserved TC277 SRC nodes for later peripheral models. */
+#define TC27X_SRC_ETH           175
+#define TC27X_SRC_MCAN_BASE     176
+#define TC27X_SRC_MCAN_COUNT    16
+/* ERAY0 interrupt lines from the public TC27x SRC layout. */
+#define TC27X_SRC_ERAY0_INT0    160
+#define TC27X_SRC_ERAY0_INT1    161
+/* Generation-specific ERAY service-request table from the public TC27x
+ * User Manual / IfxEray headers; indexes are [instance][INT0/INT1]. */
+static const uint16_t tc27x_eray_src[1][2] = {
+    { TC27X_SRC_ERAY0_INT0, TC27X_SRC_ERAY0_INT1 },
+};
 
 static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
 {
@@ -176,41 +266,70 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
 
     s->irbus = TRICORE_IR(object_new(TYPE_TRICORE_IR));
     s->asclin = TRICORE_ASCLIN(object_new(TYPE_TRICORE_ASCLIN));
+    for (unsigned i = 0; i < 3; i++) {
+        s->asclin_extra[i] = TRICORE_ASCLIN(object_new(TYPE_TRICORE_ASCLIN));
+    }
     s->virt = TRICORE_VIRT(object_new(TYPE_TRICORE_VIRT));
     s->scu = TRICORE_SCU(object_new(TYPE_TRICORE_SCU));
     s->stm = TRICORE_STM(object_new(TYPE_TRICORE_STM));
     s->sfr = TRICORE_SFR(object_new(TYPE_TRICORE_SFR));
+    s->mcan = TRICORE_MCAN(object_new(TYPE_TRICORE_MCAN));
+    s->eth = TRICORE_ETH(object_new(TYPE_TRICORE_ETH));
+    s->eray = TRICORE_ERAY(object_new(TYPE_TRICORE_ERAY));
+    /* TC2x public profile: 8 KiB ERAY message RAM, 64-byte fixture payload. */
+    qdev_prop_set_uint32(DEVICE(s->eray), "message-ram-size", 0x2000);
+    qdev_prop_set_uint32(DEVICE(s->eray), "payload-max", 64);
 
     object_property_add_child(OBJECT(dev_soc), "irbus", OBJECT(s->irbus));
     object_property_add_child(OBJECT(dev_soc), "asclin", OBJECT(s->asclin));
+    for (unsigned i = 0; i < 3; i++) {
+        char *name = g_strdup_printf("asclin%u", i + 1);
+        object_property_add_child(OBJECT(dev_soc), name,
+                                   OBJECT(s->asclin_extra[i]));
+        g_free(name);
+    }
     object_property_add_child(OBJECT(dev_soc), "virt", OBJECT(s->virt));
     object_property_add_child(OBJECT(dev_soc), "scu", OBJECT(s->scu));
     object_property_add_child(OBJECT(dev_soc), "stm", OBJECT(s->stm));
     object_property_add_child(OBJECT(dev_soc), "sfr", OBJECT(s->sfr));
+    object_property_add_child(OBJECT(dev_soc), "mcan", OBJECT(s->mcan));
+    object_property_add_child(OBJECT(dev_soc), "eth", OBJECT(s->eth));
+    object_property_add_child(OBJECT(dev_soc), "eray", OBJECT(s->eray));
 
     qdev_prop_set_bit(DEVICE(s->irbus), "tc4x-mode", false);
-    qdev_prop_set_uint8(DEVICE(s->irbus), "num-isps", 1);
-    qdev_prop_set_uint16(DEVICE(s->irbus), "num-irqs", 256);
+    qdev_prop_set_bit(DEVICE(s->irbus), "tc27x-mode", true);
+    qdev_prop_set_uint8(DEVICE(s->irbus), "num-isps", sc->ir_num_isps);
+    qdev_prop_set_uint8(DEVICE(s->irbus), "num-cpu-isps", sc->num_cpus);
+    qdev_prop_set_uint16(DEVICE(s->irbus), "num-irqs", 512);
 
-    object_property_set_link(OBJECT(&s->cpu), "ir",
-                             OBJECT(s->irbus), &error_abort);
-
-    qdev_realize(DEVICE(&s->cpu), NULL, &err);
-    if (err) {
-        error_propagate(errp, err);
-        return;
+    for (unsigned i = 0; i < sc->num_cpus; i++) {
+        object_property_set_bool(OBJECT(&s->cpus[i]), "start-powered-off",
+                                 i != 0, &error_abort);
+        CPU(&s->cpus[i])->cpu_index = i;
+        object_property_set_link(OBJECT(&s->cpus[i]), "ir",
+                                 OBJECT(s->irbus), &error_abort);
+        qdev_realize(DEVICE(&s->cpus[i]), NULL, &err);
+        if (err) { error_propagate(errp, err); return; }
     }
-
     tc27xd_soc_init_memory_mapping(dev_soc);
 
     MemoryRegion *sysmem = get_system_memory();
+    memory_region_init_io(&s->pmcsr_region, OBJECT(s), &tc27x_pmcsr_ops,
+                          s, "tc27x-pmcsr", 0x0c);
+    memory_region_add_subregion_overlap(sysmem, 0xF00360D4, &s->pmcsr_region,
+                                        1);
 
+    /* TC2x/TC27x iLLD default: fPLL=300 MHz, STMDIV=3 => fSTM=100 MHz. */
     Clock *fstm = clock_new(OBJECT(dev_soc), "fstm");
-    clock_set_hz(fstm, 50000000);
+    clock_set_hz(fstm, 100000000);
     qdev_connect_clock_in(DEVICE(s->stm), "fstm", fstm);
 
-    object_property_add_const_link(OBJECT(s->scu), "cpu", OBJECT(&s->cpu));
+    object_property_add_const_link(OBJECT(s->scu), "cpu", OBJECT(&s->cpus[0]));
     qdev_prop_set_chr(DEVICE(s->asclin), "chardev", serial_hd(0));
+    if (s->canbus) {
+        object_property_set_link(OBJECT(s->mcan), "canbus",
+                                  OBJECT(s->canbus), &error_abort);
+    }
 
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->sfr), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->scu), &error_fatal);
@@ -218,12 +337,54 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->irbus), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->virt), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->asclin), &error_fatal);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->mcan), &error_fatal);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->eth), &error_fatal);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->eray), &error_fatal);
+    s->dma = TRICORE_DMA(object_new(TYPE_TRICORE_DMA));
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->dma), &error_fatal);
+    s->port = TRICORE_PORT(object_new(TYPE_TRICORE_PORT));
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->port), &error_fatal);
+    for (unsigned i = 0; i < 3; i++) {
+        DeviceState *extra = DEVICE(s->asclin_extra[i]);
+        qdev_prop_set_chr(extra, "chardev", serial_hd(i + 1));
+        sysbus_realize_and_unref(SYS_BUS_DEVICE(extra), &error_fatal);
+    }
 
     sysbus_mmio_map(SYS_BUS_DEVICE(s->irbus), 0, 0xF0037000);
     sysbus_mmio_map(SYS_BUS_DEVICE(s->irbus), 1, 0xF0038000);
+    sysbus_mmio_map(SYS_BUS_DEVICE(s->dma), 0, 0xF0010000);
+    sysbus_mmio_map(SYS_BUS_DEVICE(s->port), 0, 0xF003A000);
+    s->ici = TRICORE_ICI(object_new(TYPE_TRICORE_ICI));
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->ici), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(s->ici), 0, 0xF003B000);
+    for (unsigned i = 0; i < 3; i++)
+        sysbus_connect_irq(SYS_BUS_DEVICE(s->ici), i,
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", 200 + i));
+    s->gate = TRICORE_GATE(object_new(TYPE_TRICORE_GATE));
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->gate), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(s->gate), 0, 0xF003B400);
 
-    qdev_connect_gpio_out_named(DEVICE(s->irbus), "isp", 0,
-        qdev_get_gpio_in_named(DEVICE(&s->cpu), "tricore.irq", 0));
+    for (unsigned i = 0; i < sc->num_cpus; i++) {
+        qdev_connect_gpio_out_named(DEVICE(s->irbus), "isp", i,
+            qdev_get_gpio_in_named(DEVICE(&s->cpus[i]), "tricore.irq", 0));
+    }
+    if (sc->ir_num_isps > sc->num_cpus) {
+        qdev_connect_gpio_out_named(DEVICE(s->irbus), "isp", sc->num_cpus,
+            qemu_allocate_irq(tc27x_dma_isp_sink, s, 0));
+    }
+
+    /* TC27D CPU register windows: F881/F883/F8850000. */
+    for (unsigned i = 0; i < sc->num_cpus; i++) {
+        struct TC27XCPUControl *c = &s->cpu_ctrl[i];
+        c->soc = s; c->id = i; c->dbgsr = i ? 1 : 0;
+        char *name = g_strdup_printf("tc27x-cpu%u-control", i);
+        memory_region_init_io(&c->region, OBJECT(s), &tc27x_cpu_ctrl_ops,
+                              c, name, 0x20000);
+        g_free(name);
+        memory_region_add_subregion_overlap(sysmem,
+                                            0xF8810000 + i * 0x20000,
+                                            &c->region, 100);
+    }
 
     sysbus_connect_irq(SYS_BUS_DEVICE(s->asclin), 0,
         qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
@@ -239,10 +400,46 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
         qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
                                TC27X_SRC_STM0_SR0));
 
+    /* MultiCAN0 exposes 16 documented SRC nodes at consecutive indices. */
+    for (unsigned i = 0; i < TC27X_SRC_MCAN_COUNT; i++) {
+        sysbus_connect_irq(SYS_BUS_DEVICE(s->mcan), i,
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                   TC27X_SRC_MCAN_BASE + i));
+    }
+
+    /* The TC27D GMAC-UNIV exposes one aggregated Ethernet service request. */
+    sysbus_connect_irq(SYS_BUS_DEVICE(s->eth), 0,
+        qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", TC27X_SRC_ETH));
+    sysbus_connect_irq(SYS_BUS_DEVICE(s->eray), 0,
+        qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", tc27x_eray_src[0][0]));
+    sysbus_connect_irq(SYS_BUS_DEVICE(s->eray), 1,
+        qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", tc27x_eray_src[0][1]));
+
     memory_region_add_subregion_overlap(sysmem, sc->memmap[TC27XD_SFR].base,
                                         &s->sfr->iomem, -1);
     memory_region_add_subregion(sysmem, sc->memmap[TC27XD_ASCLIN].base,
                                 &s->asclin->iomem);
+    memory_region_add_subregion(sysmem, sc->memmap[TC27XD_MCAN].base,
+                                &s->mcan->iomem);
+    memory_region_add_subregion(sysmem, sc->memmap[TC27XD_MCAN].base + 0x3000,
+                                &s->mcan->msg_ram);
+    memory_region_add_subregion(sysmem, 0xF001D000, &s->eth->iomem);
+    memory_region_add_subregion(sysmem, 0xF001C000, &s->eray->iomem);
+    memory_region_add_subregion(sysmem, 0xF001E000, &s->eray->msg_ram);
+    for (unsigned i = 0; i < 3; i++) {
+        memory_region_add_subregion(sysmem,
+            sc->memmap[TC27XD_ASCLIN].base + 0x200 * (i + 1),
+            &s->asclin_extra[i]->iomem);
+        sysbus_connect_irq(SYS_BUS_DEVICE(s->asclin_extra[i]), 0,
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                   TC27X_SRC_ASCLIN0_RX + 3 * (i + 1)));
+        sysbus_connect_irq(SYS_BUS_DEVICE(s->asclin_extra[i]), 1,
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                   TC27X_SRC_ASCLIN0_TX + 3 * (i + 1)));
+        sysbus_connect_irq(SYS_BUS_DEVICE(s->asclin_extra[i]), 2,
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                   TC27X_SRC_ASCLIN0_ERR + 3 * (i + 1)));
+    }
     memory_region_add_subregion(sysmem, sc->memmap[TC27XD_VIRT].base,
                                 &s->virt->iomem);
     memory_region_add_subregion(sysmem, sc->memmap[TC27XD_SCU].base,
@@ -254,8 +451,10 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
 static void tc27xd_soc_reset(DeviceState *dev_soc)
 {
     TC27XDSoCState *s = TC27XD_SOC(dev_soc);
-    
-    cpu_state_reset(&s->cpu.env);
+    TC27XDSoCClass *sc = TC27XD_SOC_GET_CLASS(s);
+    for (unsigned i = 0; i < sc->num_cpus; i++) {
+        cpu_state_reset(&s->cpus[i].env);
+    }
 }
 
 static void tc27xd_soc_init(Object *obj)
@@ -263,8 +462,18 @@ static void tc27xd_soc_init(Object *obj)
     TC27XDSoCState *s = TC27XD_SOC(obj);
     TC27XDSoCClass *sc = TC27XD_SOC_GET_CLASS(s);
 
-    object_initialize_child(obj, "tc27x", &s->cpu, sc->cpu_type);
+    for (unsigned i = 0; i < sc->num_cpus; i++) {
+        char *name = g_strdup_printf("tc27x-cpu%u", i);
+        object_initialize_child(obj, name, &s->cpus[i], sc->cpu_type);
+        g_free(name);
+    }
 }
+
+/* QOM retains the property table after class initialization for HMP output. */
+static Property tc27xd_soc_props[] = {
+    DEFINE_PROP_LINK("canbus", TC27XDSoCState, canbus,
+                     TYPE_CAN_BUS, CanBusState *),
+};
 
 static void tc27xd_soc_class_init(ObjectClass *klass, const void *data)
 {
@@ -272,6 +481,8 @@ static void tc27xd_soc_class_init(ObjectClass *klass, const void *data)
 
     dc->realize = tc27xd_soc_realize;
     dc->legacy_reset = tc27xd_soc_reset;
+    device_class_set_props_n(dc, tc27xd_soc_props,
+                             ARRAY_SIZE(tc27xd_soc_props));
 }
 
 static void tc277d_soc_class_init(ObjectClass *oc, const void *data)
@@ -281,7 +492,43 @@ static void tc277d_soc_class_init(ObjectClass *oc, const void *data)
     sc->name         = "tc277d-soc";
     sc->cpu_type     = TRICORE_CPU_TYPE_NAME("tc2x");
     sc->memmap       = tc27xd_soc_memmap;
-    sc->num_cpus     = 1;
+    sc->num_cpus     = 3;
+    sc->ir_num_isps  = 4;
+    sc->dspr_size[0] = 112 * KiB;
+    sc->dspr_size[1] = 120 * KiB;
+    sc->dspr_size[2] = 120 * KiB;
+    sc->pspr_size[0] = 24 * KiB;
+    sc->pspr_size[1] = 32 * KiB;
+    sc->pspr_size[2] = 32 * KiB;
+    sc->pflash0_size = 2 * MiB;
+    sc->pflash1_size = 2 * MiB;
+}
+
+static void tc26b_soc_class_init(ObjectClass *oc, const void *data)
+{
+    TC27XDSoCClass *sc = TC27XD_SOC_CLASS(oc);
+    tc277d_soc_class_init(oc, data);
+    sc->name = "tc26b-soc";
+    sc->num_cpus = 2;
+    sc->ir_num_isps = 2;
+    sc->dspr_size[0] = 72 * KiB;
+    sc->dspr_size[1] = 120 * KiB;
+    sc->pspr_size[0] = 16 * KiB;
+    sc->pspr_size[1] = 32 * KiB;
+    sc->dspr_size[2] = sc->pspr_size[2] = 0;
+    sc->pflash0_size = 1536 * KiB;
+    sc->pflash1_size = 0;
+}
+
+static void tc29b_soc_class_init(ObjectClass *oc, const void *data)
+{
+    TC27XDSoCClass *sc = TC27XD_SOC_CLASS(oc);
+    tc277d_soc_class_init(oc, data);
+    sc->name = "tc29b-soc";
+    sc->dspr_size[0] = 120 * KiB;
+    sc->dspr_size[1] = 240 * KiB;
+    sc->dspr_size[2] = 240 * KiB;
+    sc->pspr_size[0] = sc->pspr_size[1] = sc->pspr_size[2] = 32 * KiB;
 }
 
 static const TypeInfo tc27xd_soc_types[] = {
@@ -289,6 +536,14 @@ static const TypeInfo tc27xd_soc_types[] = {
         .name          = "tc277d-soc",
         .parent        = TYPE_TC27XD_SOC,
         .class_init    = tc277d_soc_class_init,
+    }, {
+        .name          = "tc26b-soc",
+        .parent        = TYPE_TC27XD_SOC,
+        .class_init    = tc26b_soc_class_init,
+    }, {
+        .name          = "tc29b-soc",
+        .parent        = TYPE_TC27XD_SOC,
+        .class_init    = tc29b_soc_class_init,
     }, {
         .name          = TYPE_TC27XD_SOC,
         .parent        = TYPE_SYS_BUS_DEVICE,

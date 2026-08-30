@@ -14,6 +14,7 @@
 
 #include "hw/core/sysbus.h"
 #include "hw/core/registerfields.h"
+#include "migration/vmstate.h"
 
 #define TYPE_TRICORE_IR "tricore_ir"
 #define TRICORE_IR(obj) \
@@ -36,8 +37,10 @@ FIELD(SRC_TC3X, SWSCLR, 30, 1)
 /* TC4x SRC bit layout */
 FIELD(SRC_TC4X, TOS, 12, 4)
 FIELD(SRC_TC4X, SRE, 23, 1)
+FIELD(SRC_TC4X, CS, 27, 1)
 
 FIELD(LWSR, PN, 0, 8)
+FIELD(LWSR, VM, 8, 3)
 FIELD(LWSR, VALID, 12, 1)
 FIELD(LWSR, INVALID, 13, 1)
 FIELD(LWSR, ID, 16, 9)
@@ -58,12 +61,17 @@ typedef struct TriCoreIRState {
     MemoryRegion int_region;
 
     uint32_t *src_regs;
-    uint32_t lwsr[8];
+    /* Keep storage for all documented TOS/ISP slots; individual SoCs expose
+     * only the slots they wire to CPUs or DMA. */
+    uint32_t lwsr[16];
     uint32_t lasr;
+    uint8_t tos_cs[16];
 
     qemu_irq *isp_irqs;
     
     bool tc4x_mode;
+    bool tc27x_mode;
+    uint8_t num_cpu_isps;
     uint8_t num_isps;
     uint16_t num_irqs;
 } TriCoreIRState;

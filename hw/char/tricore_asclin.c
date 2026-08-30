@@ -24,6 +24,14 @@
 
 #include <inttypes.h>
 
+static GPtrArray *asclin_lin_bus;
+
+#define ASCLIN_LIN_GATEWAY_BYTE 0xf1
+#define ASCLIN_LIN_GATEWAY_END  0xf2
+#define ASCLIN_LIN_GATEWAY_BREAK 0xf0
+#define ASCLIN_LIN_GATEWAY_RESP_TIMEOUT 0xf3
+#define ASCLIN_LIN_GATEWAY_HEADER_TIMEOUT 0xf4
+
 /*
  * TC3x register offsets are 0x00..0x50, one per 4-byte slot.
  * Enum indices below are offset/4 for TC3x. TC4x offsets start at 0x100
@@ -55,6 +63,8 @@ enum {
     BLOCK_TXDATA_LEN = 24,   /* 0x60/4: custom QEMU xfer length */
     BLOCK_TXDATA_BUF = 25,   /* 0x64/4: custom QEMU xfer buf phys addr */
 };
+
+static void asclin_uart_update_parameters(TriCoreASCLINState *s);
 
 /* TC4x register offsets (stride differs completely from TC3x) */
 #define TC4X_IOCR          0x100
@@ -117,6 +127,175 @@ static void asclin_pulse_irq(TriCoreASCLINState *s, uint32_t pulse_mask)
     }
 }
 
+static void asclin_lin_timeout_expire(void *opaque)
+{
+    TriCoreASCLINState *s = opaque;
+    uint32_t flag = s->lin_timeout_response ? MASK_FLAGS_RT : MASK_FLAGS_HT;
+    qatomic_or(&s->regs[FLAGS], flag);
+    asclin_pulse_irq(s, flag);
+}
+
+static void asclin_lin_timeout_start(TriCoreASCLINState *s, bool response)
+{
+    /* DATCON.DATLEN is the bits-per-byte setting, not the LIN slot length.
+     * Slot length is supplied by the LIN schedule/iLLD PDU. */
+    uint32_t threshold = response ? ((s->regs[DATCON] >> 16) & 0xff) :
+                                    (s->regs[LINHTIMER] & 0xff);
+    uint32_t prescaler = (s->regs[BITCON] & 0xfff) + 1;
+    uint32_t oversampling = ((s->regs[BITCON] >> 16) & 0xf) + 1;
+    uint32_t brg = s->regs[BRG] & 0xfff;
+    uint64_t baud = brg ? (100000000ULL / (prescaler * oversampling * brg)) : 115200;
+    uint64_t ns;
+
+    if (!s->lin_timeout_timer || !threshold || !baud) {
+        return;
+    }
+    s->lin_timeout_response = response;
+    ns = (uint64_t)threshold * 10 * 1000000000ULL / baud;
+    timer_mod(s->lin_timeout_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + ns);
+}
+
+static void asclin_lin_timeout_stop(TriCoreASCLINState *s)
+{
+    if (s->lin_timeout_timer) {
+        timer_del(s->lin_timeout_timer);
+    }
+}
+
+static bool asclin_lin_mode(TriCoreASCLINState *s)
+{
+    /* FRAMECON.MODE=3 is LIN (TC2x/TC3x ASCLIN definition). */
+    return ((s->regs[FRAMECON] >> 0) & 0x7) == 3;
+}
+
+static bool asclin_lin_master(TriCoreASCLINState *s)
+{
+    /* LINCON.MS (bit 26): 1 = master, 0 = slave. */
+    return (s->regs[LINCON] & (1u << 26)) != 0;
+}
+
+static bool asclin_lin_pid_valid(uint8_t pid)
+{
+    uint8_t id = pid & 0x3f;
+    unsigned p0 = ((id >> 0) ^ (id >> 1) ^ (id >> 2) ^ (id >> 4)) & 1;
+    unsigned p1 = ((id >> 1) ^ (id >> 3) ^ (id >> 4) ^ (id >> 5)) & 1;
+
+    return ((pid >> 6) & 1) == p0 && ((pid >> 7) & 1) == (p1 ^ 1);
+}
+
+/*
+ * LIN response length is a schedule property, not something encoded in the
+ * PID or DATCON.  QEMU therefore accepts an explicit schedule (pid:length:
+ * checksum, comma separated) so frame boundaries remain deterministic while
+ * preserving the hardware-visible register semantics.
+ */
+static void asclin_lin_schedule_select(TriCoreASCLINState *s, uint8_t pid)
+{
+    g_auto(GStrv) entries = NULL;
+    const char *schedule = s->lin_schedule;
+
+    if (!schedule || !*schedule) {
+        return;
+    }
+    entries = g_strsplit(schedule, ",", -1);
+    for (guint i = 0; entries[i]; i++) {
+        unsigned entry_pid, entry_len;
+        char checksum[16];
+
+        if (sscanf(entries[i], "%x:%u:%15s", &entry_pid, &entry_len,
+                   checksum) == 3 && entry_pid == pid &&
+            entry_len >= 1 && entry_len <= 8) {
+            s->lin_response_length = entry_len;
+            s->lin_checksum_enhanced = g_ascii_strcasecmp(checksum,
+                                                          "enhanced") == 0;
+            return;
+        }
+    }
+}
+
+static void asclin_lin_gateway_emit(TriCoreASCLINState *s, uint8_t byte)
+{
+    uint8_t record[2] = { ASCLIN_LIN_GATEWAY_BYTE, byte };
+
+    if (s->lin_gateway) {
+        qemu_chr_fe_write_all(&s->chr, record, sizeof(record));
+    } else {
+        qemu_chr_fe_write_all(&s->chr, &byte, 1);
+    }
+}
+
+static void asclin_lin_gateway_end(TriCoreASCLINState *s)
+{
+    uint8_t marker = ASCLIN_LIN_GATEWAY_END;
+
+    if (s->lin_gateway && asclin_lin_mode(s)) {
+        qemu_chr_fe_write_all(&s->chr, &marker, 1);
+    }
+}
+
+static void asclin_lin_bus_break(TriCoreASCLINState *s)
+{
+    asclin_lin_timeout_stop(s);
+    s->lin_sync_seen = false;
+    s->lin_pid_seen = false;
+    s->lin_data_count = 0;
+    s->lin_checksum_sum = 0;
+    asclin_lin_timeout_start(s, false);
+    qatomic_or(&s->regs[FLAGS], MASK_FLAGS_LIN_BREAK);
+    asclin_pulse_irq(s, MASK_FLAGS_LIN_BREAK);
+}
+
+static void asclin_lin_bus_receive(TriCoreASCLINState *s, uint8_t byte)
+{
+    if (byte == 0x55) {
+        s->lin_sync_seen = true;
+        s->lin_pid_seen = false;
+    } else if (s->lin_sync_seen && !s->lin_pid_seen) {
+        s->lin_pid_seen = true;
+        asclin_lin_schedule_select(s, byte & 0xff);
+        asclin_lin_timeout_start(s, true);
+        s->lin_data_count = 0;
+        s->lin_checksum_sum = (s->regs[LINCON] & (1u << 25) &&
+                               s->lin_checksum_enhanced) ? byte : 0;
+        if (!asclin_lin_pid_valid(byte)) {
+            qatomic_or(&s->regs[FLAGS], MASK_FLAGS_CE);
+            asclin_pulse_irq(s, MASK_FLAGS_CE);
+        }
+    }
+
+    if ((s->regs[LINCON] & (1u << 25)) && s->lin_pid_seen &&
+        s->lin_data_count >= s->lin_response_length) {
+        if (byte != (uint8_t)~s->lin_checksum_sum) {
+            qatomic_or(&s->regs[FLAGS], MASK_FLAGS_LC);
+            asclin_pulse_irq(s, MASK_FLAGS_LC);
+        }
+        s->lin_sync_seen = false;
+        s->lin_pid_seen = false;
+        s->lin_data_count = 0;
+        s->lin_checksum_sum = 0;
+        asclin_lin_timeout_stop(s);
+        return;
+    }
+
+    if (asclin_buffer_free(s) == 0) {
+        qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RFO);
+        asclin_pulse_irq(s, MASK_FLAGS_RFO);
+        return;
+    }
+    s->rxbuf[s->rxbufwriteidx] = byte;
+    s->rxbufwriteidx = (s->rxbufwriteidx + 1) % ASCLIN_RX_BUFFER;
+    if (s->lin_pid_seen && s->lin_data_count < s->lin_response_length) {
+        s->lin_checksum_sum += byte;
+        s->lin_data_count++;
+        if (!(s->regs[LINCON] & (1u << 25)) &&
+            s->lin_data_count >= s->lin_response_length) {
+            asclin_lin_timeout_stop(s);
+        }
+    }
+    qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RFL | MASK_FLAGS_RR | MASK_FLAGS_RH);
+    asclin_pulse_irq(s, MASK_FLAGS_RFL);
+}
+
 /*
  * Retry callback when the chardev backend was busy on the last attempt.
  */
@@ -128,7 +307,12 @@ static gboolean uart_transmit_watch(void *do_not_use, GIOCondition cond,
 
     s->watch_tag = 0;
 
-    ret = qemu_chr_fe_write_all(&s->chr, (uint8_t *)&s->txbuf, 1);
+    if (s->lin_gateway && asclin_lin_mode(s)) {
+        asclin_lin_gateway_emit(s, s->txbuf);
+        ret = 1;
+    } else {
+        ret = qemu_chr_fe_write_all(&s->chr, (uint8_t *)&s->txbuf, 1);
+    }
     if (ret <= 0) {
         s->watch_tag = qemu_chr_fe_add_watch(&s->chr, G_IO_OUT | G_IO_HUP,
                                              uart_transmit_watch, s);
@@ -140,6 +324,10 @@ static gboolean uart_transmit_watch(void *do_not_use, GIOCondition cond,
 
 drained:
     qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TFL | MASK_FLAGS_TC);
+    if (asclin_lin_mode(s)) {
+        qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TH | MASK_FLAGS_TR);
+    }
+    asclin_lin_gateway_end(s);
     asclin_pulse_irq(s, MASK_FLAGS_TFL | MASK_FLAGS_TC);
     return G_SOURCE_REMOVE;
 }
@@ -153,7 +341,54 @@ static void asclin_txdata_write(TriCoreASCLINState *s, uint32_t value)
 {
     int ret;
 
+    /* CLC.DISR gates the module clock and suppresses transfers. */
+    if (s->regs[CLC] & 1u) {
+        return;
+    }
+
     s->txbuf = value;
+
+    if (asclin_lin_mode(s) && asclin_lin_master(s) && value == 0x55 &&
+        !s->lin_sync_seen) {
+        if (asclin_lin_bus) {
+            for (guint i = 0; i < asclin_lin_bus->len; i++) {
+                TriCoreASCLINState *peer = g_ptr_array_index(asclin_lin_bus, i);
+                if (asclin_lin_mode(peer)) {
+                    asclin_lin_bus_break(peer);
+                }
+            }
+        }
+        if (s->lin_gateway) {
+            uint8_t marker = ASCLIN_LIN_GATEWAY_BREAK;
+            qemu_chr_fe_write_all(&s->chr, &marker, 1);
+        }
+    }
+
+    /* FRAMECON.LB feeds transmitted bytes back into the receive FIFO. */
+    if (s->regs[FRAMECON] & (1u << 28)) {
+        if (asclin_buffer_free(s) == 0) {
+            qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TFO);
+            asclin_pulse_irq(s, MASK_FLAGS_TFO);
+        } else {
+            asclin_lin_bus_receive(s, value);
+        }
+    }
+
+    /* A master starts a header; a slave may transmit only while a response
+     * is pending (RR was set by receipt of the preceding header/bytes). */
+    if (asclin_lin_mode(s) && asclin_lin_bus &&
+        (asclin_lin_master(s) || (s->regs[FLAGS] & MASK_FLAGS_RR))) {
+        for (guint i = 0; i < asclin_lin_bus->len; i++) {
+            TriCoreASCLINState *peer = g_ptr_array_index(asclin_lin_bus, i);
+            if (peer != s && asclin_lin_mode(peer)) {
+                asclin_lin_bus_receive(peer, value);
+            }
+        }
+        if (!asclin_lin_master(s)) {
+            qatomic_and(&s->regs[FLAGS], ~MASK_FLAGS_RR);
+        }
+    }
+
     ret = qemu_chr_fe_write_all(&s->chr, (uint8_t *)&s->txbuf, 1);
     if (ret <= 0) {
         s->watch_tag = qemu_chr_fe_add_watch(&s->chr, G_IO_OUT | G_IO_HUP,
@@ -166,6 +401,10 @@ static void asclin_txdata_write(TriCoreASCLINState *s, uint32_t value)
 
 drained:
     qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TFL | MASK_FLAGS_TC);
+    if (asclin_lin_mode(s)) {
+        qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TH | MASK_FLAGS_TR);
+    }
+    asclin_lin_gateway_end(s);
     asclin_pulse_irq(s, MASK_FLAGS_TFL | MASK_FLAGS_TC);
 }
 
@@ -239,6 +478,9 @@ static uint32_t asclin_rxdata_read(TriCoreASCLINState *s, bool peek)
     r = s->rxbuf[s->rxbufreadidx];
     if (!peek) {
         s->rxbufreadidx = (s->rxbufreadidx + 1) % ASCLIN_RX_BUFFER;
+        if (s->rxbufreadidx == s->rxbufwriteidx) {
+            qatomic_and(&s->regs[FLAGS], ~MASK_FLAGS_RFL);
+        }
     }
     return r;
 }
@@ -373,6 +615,7 @@ static void uart_write(void *opaque, hwaddr offset, uint64_t value,
     TriCoreASCLINState *s = opaque;
     hwaddr reg_addr = offset >> 2;
     uint32_t val = (uint32_t)value;
+    bool old_lin_mode = asclin_lin_mode(s);
 
     /* TC4x TXDATA mirror writes enqueue data */
     if (offset >= TC4X_TXDATA_BASE && offset <= TC4X_TXDATA_LAST) {
@@ -433,7 +676,12 @@ static void uart_write(void *opaque, hwaddr offset, uint64_t value,
         s->regs[BLOCK_TXDATA_LEN] = val;
         break;
     case BLOCK_TXDATA_BUF:
-        asclin_txdata_block(s, val);
+        if (s->block_tx_enabled) {
+            asclin_txdata_block(s, val);
+        } else {
+            qemu_log_mask(LOG_GUEST_ERROR,
+                "asclin_uart: QEMU block-TX extension disabled\n");
+        }
         break;
 
     /* TC4x */
@@ -492,6 +740,23 @@ static void uart_write(void *opaque, hwaddr offset, uint64_t value,
             offset);
         break;
     }
+
+    /* Keep the host chardev framing synchronized with guest configuration. */
+    if (reg_addr == BITCON || reg_addr == BRG || reg_addr == FRAMECON ||
+        reg_addr == DATCON || reg_addr == TC4X_BITCON / 4 ||
+        reg_addr == TC4X_BRG / 4 || reg_addr == TC4X_FRAMECON / 4 ||
+        reg_addr == TC4X_DATCON / 4) {
+        asclin_uart_update_parameters(s);
+    }
+    if (reg_addr == FRAMECON || reg_addr == TC4X_FRAMECON / 4) {
+        if (old_lin_mode && !asclin_lin_mode(s)) {
+            qatomic_and(&s->regs[FLAGS],
+                        ~(MASK_FLAGS_TH | MASK_FLAGS_TR |
+                          MASK_FLAGS_RH | MASK_FLAGS_RR));
+            s->lin_sync_seen = false;
+            s->lin_pid_seen = false;
+        }
+    }
 }
 
 static const MemoryRegionOps asclin_uart_mmio_ops = {
@@ -513,6 +778,28 @@ static void uart_rx(void *opaque, const uint8_t *buf, int size)
     TriCoreASCLINState *s = opaque;
 
     while (size > 0) {
+        if (s->lin_gateway && asclin_lin_mode(s)) {
+            if (s->lin_gateway_rx_type == ASCLIN_LIN_GATEWAY_BYTE) {
+                asclin_lin_bus_receive(s, *buf++);
+                s->lin_gateway_rx_type = 0;
+                size--;
+                continue;
+            }
+            uint8_t record = *buf++;
+            if (record == ASCLIN_LIN_GATEWAY_BREAK) {
+                asclin_lin_bus_break(s);
+            } else if (record == ASCLIN_LIN_GATEWAY_RESP_TIMEOUT) {
+                qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RT);
+                asclin_pulse_irq(s, MASK_FLAGS_RT);
+            } else if (record == ASCLIN_LIN_GATEWAY_HEADER_TIMEOUT) {
+                qatomic_or(&s->regs[FLAGS], MASK_FLAGS_HT);
+                asclin_pulse_irq(s, MASK_FLAGS_HT);
+            }
+            s->lin_gateway_rx_type = (record == ASCLIN_LIN_GATEWAY_BYTE) ?
+                                     ASCLIN_LIN_GATEWAY_BYTE : 0;
+            size--;
+            continue;
+        }
         if (asclin_buffer_free(s) == 0) {
             error_report(
                 "asclin_uart: RX buffer overflowed, %d bytes dropped", size);
@@ -527,6 +814,9 @@ static void uart_rx(void *opaque, const uint8_t *buf, int size)
 
     if (s->rxbufreadidx != s->rxbufwriteidx) {
         qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RFL);
+        if (asclin_lin_mode(s)) {
+            qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RH | MASK_FLAGS_RR);
+        }
         asclin_pulse_irq(s, MASK_FLAGS_RFL);
     }
 }
@@ -535,7 +825,8 @@ static int uart_can_rx(void *opaque)
 {
     TriCoreASCLINState *s = TRICORE_ASCLIN(opaque);
 
-    if ((s->regs[RXFIFOCON] & MASK_RXFIFOCON_ENI) &&
+    if (!(s->regs[CLC] & 1u) &&
+        (s->regs[RXFIFOCON] & MASK_RXFIFOCON_ENI) &&
         asclin_buffer_free(s) > 0) {
         return 1;
     }
@@ -555,16 +846,42 @@ static void asclin_uart_reset(DeviceState *d)
         s->regs[i] = 0;
     }
     asclin_buffer_reset(s);
+    s->lin_sync_seen = false;
+    s->lin_pid_seen = false;
+    s->lin_gateway_rx_type = 0;
+    s->lin_data_count = 0;
+    s->lin_checksum_sum = 0;
 }
 
 static void asclin_uart_update_parameters(TriCoreASCLINState *s)
 {
     QEMUSerialSetParams ssp;
+    uint32_t bitcon = s->regs[BITCON];
+    uint32_t brg = s->regs[BRG];
+    uint32_t framecon = s->regs[FRAMECON];
+    uint32_t prescaler = (bitcon & 0xfff) + 1;
+    uint32_t oversampling = ((bitcon >> 16) & 0xf) + 1;
+    uint32_t denominator = brg & 0xfff;
+    uint32_t numerator = (brg >> 16) & 0xfff;
+    uint32_t baudrate = 115200;
 
-    ssp.speed = 921600;
-    ssp.data_bits = 8;
-    ssp.parity = 'N';
-    ssp.stop_bits = 1;
+    /* The TC2x/TC3x iLLD derives baud from a 100 MHz peripheral clock. */
+    if (denominator != 0 && numerator != 0) {
+        uint64_t rate = 100000000ULL * numerator;
+        rate /= denominator * prescaler * oversampling;
+        if (rate != 0 && rate <= UINT32_MAX) {
+            baudrate = rate;
+        }
+    }
+
+    ssp.speed = baudrate;
+    ssp.data_bits = (s->regs[DATCON] & 0xf) + 1;
+    if (ssp.data_bits < 5 || ssp.data_bits > 8) {
+        ssp.data_bits = 8;
+    }
+    ssp.parity = (framecon & (1u << 30)) ?
+                 ((framecon & (1u << 31)) ? 'O' : 'E') : 'N';
+    ssp.stop_bits = ((framecon >> 9) & 0x7) ? 2 : 1;
     qemu_chr_fe_ioctl(&s->chr, CHR_IOCTL_SERIAL_SET_PARAMS, &ssp);
 }
 
@@ -572,8 +889,34 @@ static void asclin_uart_realize(DeviceState *dev, Error **errp)
 {
     TriCoreASCLINState *s = TRICORE_ASCLIN(dev);
 
+    if (s->lin_response_length == 0 || s->lin_response_length > 8) {
+        error_setg(errp, "lin-response-length must be between 1 and 8");
+        return;
+    }
+
+    if (!asclin_lin_bus) {
+        asclin_lin_bus = g_ptr_array_new();
+    }
+    g_ptr_array_add(asclin_lin_bus, s);
+
     qemu_chr_fe_set_handlers(&s->chr, uart_can_rx, uart_rx, uart_event, NULL,
                              s, NULL, true);
+}
+
+static void asclin_uart_unrealize(DeviceState *dev)
+{
+    TriCoreASCLINState *s = TRICORE_ASCLIN(dev);
+
+    if (asclin_lin_bus) {
+        g_ptr_array_remove_fast(asclin_lin_bus, s);
+    }
+    qemu_chr_fe_set_handlers(&s->chr, NULL, NULL, NULL, NULL,
+                             NULL, NULL, false);
+    if (s->lin_timeout_timer) {
+        timer_del(s->lin_timeout_timer);
+        timer_free(s->lin_timeout_timer);
+        s->lin_timeout_timer = NULL;
+    }
 }
 
 static void asclin_uart_init(Object *obj)
@@ -589,6 +932,8 @@ static void asclin_uart_init(Object *obj)
     sysbus_init_irq(sbd, &s->EXSR);
     s->rxbufreadidx = 0;
     s->rxbufwriteidx = 0;
+    s->lin_timeout_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
+                                        asclin_lin_timeout_expire, s);
 
     asclin_uart_update_parameters(s);
 }
@@ -611,6 +956,21 @@ static const VMStateDescription vmstate_asclin_uart = {
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
         VMSTATE_UINT32_ARRAY(regs, TriCoreASCLINState, ASCLIN_R_MAX),
+        VMSTATE_UINT32(txbuf, TriCoreASCLINState),
+        VMSTATE_UINT8_ARRAY(rxbuf, TriCoreASCLINState, ASCLIN_RX_BUFFER),
+        VMSTATE_UINT32(rxbufwriteidx, TriCoreASCLINState),
+        VMSTATE_UINT32(rxbufreadidx, TriCoreASCLINState),
+        VMSTATE_BOOL(block_tx_enabled, TriCoreASCLINState),
+        VMSTATE_BOOL(lin_gateway, TriCoreASCLINState),
+        VMSTATE_UINT8(lin_gateway_rx_type, TriCoreASCLINState),
+        VMSTATE_UINT8(lin_data_count, TriCoreASCLINState),
+        VMSTATE_UINT16(lin_checksum_sum, TriCoreASCLINState),
+        VMSTATE_TIMER_PTR(lin_timeout_timer, TriCoreASCLINState),
+        VMSTATE_BOOL(lin_timeout_response, TriCoreASCLINState),
+        VMSTATE_UINT8(lin_response_length, TriCoreASCLINState),
+        VMSTATE_BOOL(lin_checksum_enhanced, TriCoreASCLINState),
+        VMSTATE_BOOL(lin_sync_seen, TriCoreASCLINState),
+        VMSTATE_BOOL(lin_pid_seen, TriCoreASCLINState),
         VMSTATE_END_OF_LIST()
     },
     .post_load = asclin_uart_post_load,
@@ -618,6 +978,14 @@ static const VMStateDescription vmstate_asclin_uart = {
 
 static const Property asclin_uart_properties[] = {
     DEFINE_PROP_CHR("chardev", TriCoreASCLINState, chr),
+    DEFINE_PROP_BOOL("block-tx-enabled", TriCoreASCLINState,
+                     block_tx_enabled, true),
+    DEFINE_PROP_BOOL("lin-gateway", TriCoreASCLINState, lin_gateway, false),
+    DEFINE_PROP_UINT8("lin-response-length", TriCoreASCLINState,
+                      lin_response_length, 8),
+    DEFINE_PROP_BOOL("lin-checksum-enhanced", TriCoreASCLINState,
+                     lin_checksum_enhanced, true),
+    DEFINE_PROP_STRING("lin-schedule", TriCoreASCLINState, lin_schedule),
 };
 
 static void asclin_uart_class_init(ObjectClass *klass, const void *data)
@@ -625,6 +993,7 @@ static void asclin_uart_class_init(ObjectClass *klass, const void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = asclin_uart_realize;
+    dc->unrealize = asclin_uart_unrealize;
     dc->legacy_reset = asclin_uart_reset;
     dc->vmsd = &vmstate_asclin_uart;
     device_class_set_props(dc, asclin_uart_properties);

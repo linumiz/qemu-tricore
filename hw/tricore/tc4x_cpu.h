@@ -23,11 +23,13 @@ struct TC4xCPUState {
 
     MemoryRegion container;
     MemoryRegion local_container;
+    MemoryRegion board_memory_alias;
     MemoryRegion sfr_stub;
     MemoryRegion dspr;
     MemoryRegion pspr;
     MemoryRegion dlmu;
     MemoryRegion pflash;
+    MemoryRegion pflash_alias;
 
     Clock *fcpu;
     Clock *fstm;
@@ -36,6 +38,11 @@ struct TC4xCPUState {
     uint32_t dpsr_size;
     uint32_t dlmu_size;
     uint32_t pflash_size;
+    uint32_t boot_pc;
+    uint32_t bootcon;
+    uint32_t krst0;
+    uint32_t krst1;
+    uint8_t migration_running;
 
     char *cpu_type;
     MemoryRegion *board_memory;
@@ -44,5 +51,6 @@ struct TC4xCPUState {
 
 void tc4x_cpu_load_kernel(TriCoreCPU *cpu, const char *kernel_filename,
                           hwaddr mem_base, int mem_size);
+void tc4x_cpu_start_core(TC4xCPUState *cpu, hwaddr entry);
 
 #endif /* TC4X_CPU_H */

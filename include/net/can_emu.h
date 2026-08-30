@@ -62,6 +62,18 @@ typedef struct qemu_can_frame {
 #define QEMU_CAN_FRMF_BRS     0x01 /* bit rate switch (2nd bitrate for data) */
 #define QEMU_CAN_FRMF_ESI     0x02 /* error state ind. of transmitting node */
 #define QEMU_CAN_FRMF_TYPE_FD 0x10 /* internal bit ind. of CAN FD frame */
+#define QEMU_CAN_FRMF_TYPE_XL 0x20 /* internal bit ind. of CAN XL frame */
+
+/* CAN XL carries protocol metadata and up to 2048 payload bytes. */
+typedef struct qemu_can_xl_frame {
+    qemu_canid_t can_id;
+    uint8_t flags;
+    uint8_t sdt;
+    uint16_t vcid;
+    uint16_t acceptance_field;
+    uint16_t payload_len;
+    uint8_t data[2048] QEMU_ALIGNED(8);
+} qemu_can_xl_frame;
 
 /**
  * struct qemu_can_filter - CAN ID based filter in can_register().
@@ -85,6 +97,17 @@ typedef struct qemu_can_filter {
 #define QEMU_CAN_INV_FILTER 0x20000000U
 
 typedef struct CanBusClientState CanBusClientState;
+typedef struct CanBusBitClientInfo CanBusBitClientInfo;
+
+typedef struct CanBusBitSample {
+    bool level;
+    uint64_t timestamp_ns;
+} CanBusBitSample;
+
+struct CanBusBitClientInfo {
+    void (*sample)(CanBusClientState *, const CanBusBitSample *sample);
+    void (*arbitration_lost)(CanBusClientState *);
+};
 
 #define TYPE_CAN_BUS "can-bus"
 OBJECT_DECLARE_SIMPLE_TYPE(CanBusState, CAN_BUS)
@@ -93,6 +116,8 @@ typedef struct CanBusClientInfo {
     bool (*can_receive)(CanBusClientState *);
     ssize_t (*receive)(CanBusClientState *,
         const struct qemu_can_frame *frames, size_t frames_cnt);
+    ssize_t (*receive_xl)(CanBusClientState *,
+        const qemu_can_xl_frame *frames, size_t frames_cnt);
 } CanBusClientInfo;
 
 struct CanBusClientState {
@@ -105,6 +130,7 @@ struct CanBusClientState {
     char *name;
     void (*destructor)(CanBusClientState *);
     bool fd_mode;
+    CanBusBitClientInfo *bit_info;
 };
 
 int can_bus_filter_match(struct qemu_can_filter *filter, qemu_canid_t can_id);
@@ -116,6 +142,37 @@ int can_bus_remove_client(CanBusClientState *client);
 ssize_t can_bus_client_send(CanBusClientState *,
                             const struct qemu_can_frame *frames,
                             size_t frames_cnt);
+
+/* Deliver CAN XL frames only to clients that advertise an XL callback. */
+ssize_t can_bus_client_send_xl(CanBusClientState *,
+                               const qemu_can_xl_frame *, size_t frames_cnt);
+
+/* Schedule delivery after a virtual-time delay (nanoseconds). */
+ssize_t can_bus_client_send_timed(CanBusClientState *,
+                                  const struct qemu_can_frame *frames,
+                                  size_t frames_cnt, uint64_t delay_ns);
+
+/* Deliver a bitstream as timestamped virtual-time samples to bit-capable
+ * peers.  Frame-based clients are intentionally ignored. */
+ssize_t can_bus_client_send_bits(CanBusClientState *, const uint8_t *bits,
+                                 size_t bit_count, uint64_t bit_time_ns,
+                                 uint64_t start_time_ns);
+
+/* CAN uses a dominant-low wired-AND bus: any dominant bit wins. */
+bool can_bus_wired_and(const bool *drives, size_t drive_count);
+
+/* Return the surviving sender index, or -1 when no sender is provided. */
+ssize_t can_bus_arbitrate_bits(const uint8_t *streams, size_t sender_count,
+                               size_t stream_stride, size_t bit_count);
+
+ssize_t can_bus_arbitrate_clients(CanBusClientState *const *senders,
+                                  const uint8_t *streams, size_t sender_count,
+                                  size_t stream_stride, size_t bit_count);
+
+ssize_t can_bus_sample_clients(CanBusClientState *const *senders,
+                               size_t sender_count, const uint8_t *streams,
+                               size_t stream_stride, size_t bit_count,
+                               uint64_t bit_time_ns, uint64_t start_time_ns);
 
 int can_bus_client_set_filters(CanBusClientState *,
                                const struct qemu_can_filter *filters,

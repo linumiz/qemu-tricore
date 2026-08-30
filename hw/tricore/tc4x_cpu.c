@@ -23,15 +23,49 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
+#define TC4X_PFLASH_C_BASE  0x80000000ULL
+#define TC4X_PFLASH_NC_BASE 0xA0000000ULL
+#define TC4X_PFLASH_STRIDE  0x00400000ULL
+
 static uint64_t tc4x_cpu_sfr_stub_read(void *opaque, hwaddr offset,
                                        unsigned size)
 {
+    TC4xCPUState *s = opaque;
+
+    switch (offset) {
+    case 0xD000: return s->krst0;
+    case 0xD004: return s->krst1;
+    case 0x1FE08: return s->boot_pc;
+    case 0x1FE60: return s->bootcon;
+    default: break;
+    }
     return 0;
 }
 
 static void tc4x_cpu_sfr_stub_write(void *opaque, hwaddr offset,
                                     uint64_t value, unsigned size)
 {
+    TC4xCPUState *s = opaque;
+
+    switch (offset) {
+    case 0xD000:
+        s->krst0 = value;
+        break;
+    case 0xD004:
+        s->krst1 = value;
+        break;
+    case 0x1FE08:
+        s->boot_pc = value;
+        break;
+    case 0x1FE60:
+        s->bootcon = value;
+        if (!(value & 1)) {
+            tc4x_cpu_start_core(s, s->boot_pc);
+        }
+        break;
+    default:
+        break;
+    }
 }
 
 static const MemoryRegionOps tc4x_cpu_sfr_stub_ops = {
@@ -82,8 +116,11 @@ static void tc4x_cpu_realize(DeviceState *dev, Error **errp)
         return;
     }
 
-    memory_region_add_subregion_overlap(&s->local_container, 0, s->board_memory,
-                                        -1);
+    memory_region_init_alias(&s->board_memory_alias, OBJECT(s),
+                             "tc4x-board-memory", s->board_memory, 0,
+                             memory_region_size(s->board_memory));
+    memory_region_add_subregion_overlap(&s->local_container, 0,
+                                        &s->board_memory_alias, -1);
     /* TODO: add mirror mememory */
 
     s->tricore = TRICORE_CPU(
@@ -92,6 +129,9 @@ static void tc4x_cpu_realize(DeviceState *dev, Error **errp)
         error_propagate(errp, err);
         return;
     }
+    /* Nested CPUs must have stable distinct indices; migration registration
+     * uses this value to distinguish the per-core CPU state streams. */
+    CPU(s->tricore)->cpu_index = s->id;
 
     object_property_set_link(OBJECT(s->tricore), "memory",
                              OBJECT(&s->local_container), &error_abort);
@@ -131,7 +171,15 @@ static void tc4x_cpu_realize(DeviceState *dev, Error **errp)
         return;
     }
     memory_region_add_subregion(
-        &s->container, 0x80000000 - (s->id * s->pflash_size), &s->pflash);
+        &s->container, TC4X_PFLASH_C_BASE + (s->id * TC4X_PFLASH_STRIDE),
+        &s->pflash);
+    char *pflash_alias_name = g_strdup_printf("CPU%d_PFLASH_ALIAS", s->id);
+    memory_region_init_alias(&s->pflash_alias, OBJECT(s), pflash_alias_name,
+                             &s->pflash, 0, s->pflash_size);
+    free(pflash_alias_name);
+    memory_region_add_subregion(
+        &s->container, TC4X_PFLASH_NC_BASE + (s->id * TC4X_PFLASH_STRIDE),
+        &s->pflash_alias);
 
     char *dsprname = g_strdup_printf("CPU%d_DSPR", s->id);
     memory_region_init_ram(&s->dspr, NULL, dsprname, s->dpsr_size, errp);
@@ -178,12 +226,39 @@ static const Property tc4x_cpu_properties[] = {
     DEFINE_PROP_UINT32("pflash-size", TC4xCPUState, pflash_size, 4 * MiB),
 };
 
+static int tc4x_cpu_post_load(void *opaque, int version_id)
+{
+    TC4xCPUState *s = opaque;
+    /* Only cores that were running at save time may be resumed.  A powered-
+     * off secondary core must remain halted on the incoming VM. */
+    if (s->tricore && s->migration_running) {
+        CPU(s->tricore)->halted = 0;
+        cpu_resume(CPU(s->tricore));
+        qemu_cpu_kick(CPU(s->tricore));
+    }
+    return 0;
+}
+
+static int tc4x_cpu_pre_save(void *opaque)
+{
+    TC4xCPUState *s = opaque;
+    s->migration_running = s->tricore && !CPU(s->tricore)->halted;
+    return 0;
+}
+
 static const VMStateDescription vmstate_tc4x_cpu = {
     .name = "tc4x_cpu",
     .version_id = 1,
     .minimum_version_id = 1,
+    .pre_save = tc4x_cpu_pre_save,
+    .post_load = tc4x_cpu_post_load,
     .fields = (const VMStateField[]){ VMSTATE_CLOCK(fstm, TC4xCPUState),
                                       VMSTATE_CLOCK(fcpu, TC4xCPUState),
+                                      VMSTATE_UINT32(bootcon, TC4xCPUState),
+                                      VMSTATE_UINT32(boot_pc, TC4xCPUState),
+                                      VMSTATE_UINT32(krst0, TC4xCPUState),
+                                      VMSTATE_UINT32(krst1, TC4xCPUState),
+                                      VMSTATE_UINT8(migration_running, TC4xCPUState),
                                       VMSTATE_END_OF_LIST() }
 };
 
@@ -247,6 +322,22 @@ void tc4x_cpu_load_kernel(TriCoreCPU *cpu, const char *kernel_filename,
      */
     qemu_register_reset(tc4x_cpu_reset, cpu);
     s->PC = entry;
+}
+
+void tc4x_cpu_start_core(TC4xCPUState *cpu, hwaddr entry)
+{
+    CPUState *cs;
+
+    if (!cpu || !cpu->tricore) {
+        return;
+    }
+
+    cs = CPU(cpu->tricore);
+    cpu->tricore->env.PC = entry;
+    cs->halted = 0;
+    qemu_log_mask(CPU_LOG_EXEC, "tc4x: starting CPU%u at PC 0x%08" PRIx64 "\n",
+                  cpu->id, (uint64_t)entry);
+    cpu_resume(cs);
 }
 
 

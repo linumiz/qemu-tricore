@@ -1,0 +1,181 @@
+#include "qemu/osdep.h"
+#include "hw/dma/tricore_dma.h"
+#include "trace.h"
+#include "system/address-spaces.h"
+#include "system/memory.h"
+#include "hw/core/irq.h"
+#include "migration/vmstate.h"
+
+/* Public AURIX DMA channel model: a programmed move-engine request is
+ * completed deterministically and raises the channel completion interrupt. */
+#define DMA_SRC 0x00
+#define DMA_DST 0x04
+#define DMA_LEN 0x08
+#define DMA_CTL 0x0c
+#define DMA_STAT 0x10
+#define DMA_CTL_START BIT(0)
+#define DMA_CTL_IRQ BIT(1)
+#define DMA_STAT_DONE BIT(0)
+#define DMA_STAT_ERROR BIT(1)
+#define DMA_STAT_DESC_ERROR BIT(2)
+#define DMA_STAT_EOL BIT(3)
+#define DMA_CTL_CHAIN BIT(2)
+#define DMA_CTL_REQ_ENABLE BIT(3)
+#define DMA_STAT_ACCESS_ERROR BIT(4)
+#define DMA_STAT_BUS_ERROR BIT(5)
+
+const uint8_t tricore_dma_request_matrix[3][4] = {
+    { TRICORE_DMA_REQ_ASCLIN0, TRICORE_DMA_REQ_MCAN0,
+      TRICORE_DMA_REQ_ERAY0, TRICORE_DMA_REQ_ETH },
+    { TRICORE_DMA_REQ_ASCLIN0, TRICORE_DMA_REQ_MCAN0,
+      TRICORE_DMA_REQ_ERAY0, TRICORE_DMA_REQ_ETH },
+    { TRICORE_DMA_REQ_ASCLIN0, TRICORE_DMA_REQ_MCAN0,
+      TRICORE_DMA_REQ_ERAY0, TRICORE_DMA_REQ_ETH },
+};
+
+static uint64_t dma_read(void *opaque, hwaddr off, unsigned size)
+{
+    TriCoreDMAState *s = opaque;
+    switch (off) { case DMA_SRC: return s->src; case DMA_DST: return s->dst;
+    case DMA_LEN: return s->length; case DMA_CTL: return s->control;
+    case DMA_STAT: return s->status; case 0x14: return s->descriptor;
+    case 0x18: return s->request; case 0x1c: return s->accen;
+    case 0x20: return s->error_enable; case 0x24: return s->status;
+    case 0x28: return s->priority;
+    default: trace_tricore_dma_unimplemented(off, 0); return 0; }
+}
+
+static void dma_write(void *opaque, hwaddr off, uint64_t value, unsigned size)
+{
+    TriCoreDMAState *s = opaque;
+    switch (off) {
+    case DMA_SRC: s->src = value; break;
+    case DMA_DST: s->dst = value; break;
+    case DMA_LEN: s->length = value; break;
+    case DMA_STAT: s->status &= ~(value & (DMA_STAT_DONE | DMA_STAT_ERROR |
+                                             DMA_STAT_DESC_ERROR | DMA_STAT_EOL)); break;
+    case 0x14: s->descriptor = value; break;
+    case 0x18: s->request = value & 0xff; break;
+    case 0x1c: s->accen = value; break;
+    case 0x20: s->error_enable = value & (DMA_STAT_ACCESS_ERROR | DMA_STAT_BUS_ERROR); break;
+    case 0x24: s->status &= ~value; break;
+    case 0x28: s->priority = value & 0xff; break;
+    case DMA_CTL:
+        s->control = value & (DMA_CTL_START | DMA_CTL_IRQ | DMA_CTL_CHAIN |
+                               DMA_CTL_REQ_ENABLE);
+        if ((value & DMA_CTL_START) && !(s->accen & 1)) {
+            s->status = DMA_STAT_ACCESS_ERROR;
+            if ((s->error_enable & DMA_STAT_ACCESS_ERROR) && (value & DMA_CTL_IRQ)) {
+                qemu_set_irq(s->irq, 1); qemu_set_irq(s->irq, 0);
+            }
+            break;
+        }
+        if (value & DMA_CTL_START) {
+            s->active = true;
+            s->pending_request = false;
+            s->bytes_done = 0;
+            MemTxResult r = MEMTX_OK;
+            unsigned count = 0;
+            do {
+                uint32_t src = s->src, dst = s->dst, len = s->length, next = 0;
+                if ((value & DMA_CTL_CHAIN) && s->descriptor) {
+                    uint32_t d[4];
+                    r = address_space_read(&address_space_memory, s->descriptor,
+                                           MEMTXATTRS_UNSPECIFIED, d, sizeof(d));
+                    if (r != MEMTX_OK || !d[2] || d[2] > 16 * 1024 * 1024) {
+                        s->status = DMA_STAT_DESC_ERROR;
+                        trace_tricore_dma_descriptor_error(s->descriptor,
+                                                           s->status);
+                        break;
+                    }
+                    src = le32_to_cpu(d[0]); dst = le32_to_cpu(d[1]);
+                    len = le32_to_cpu(d[2]); next = le32_to_cpu(d[3]);
+                }
+                uint8_t *buf = g_malloc(len);
+                r = address_space_read(&address_space_memory, src,
+                                       MEMTXATTRS_UNSPECIFIED, buf, len);
+                if (r == MEMTX_OK) r = address_space_write(&address_space_memory, dst,
+                                                           MEMTXATTRS_UNSPECIFIED, buf, len);
+                g_free(buf);
+                if (r != MEMTX_OK) break;
+                s->bytes_done += len;
+                if (!(value & DMA_CTL_CHAIN) || !next) {
+                    s->status = DMA_STAT_DONE | ((value & DMA_CTL_CHAIN) ? DMA_STAT_EOL : 0);
+                    break;
+                }
+                s->descriptor = next;
+            } while (++count < 256);
+            if (count == 256) s->status = DMA_STAT_DESC_ERROR;
+            if (r != MEMTX_OK && !(s->status & DMA_STAT_DESC_ERROR)) s->status = DMA_STAT_ERROR;
+            s->active = false;
+            if ((value & DMA_CTL_IRQ) && r == MEMTX_OK) {
+                qemu_set_irq(s->irq, 1);
+                qemu_set_irq(s->irq, 0);
+            }
+        }
+        break;
+    default: trace_tricore_dma_unimplemented(off, value); break;
+    }
+}
+
+void tricore_dma_request(TriCoreDMAState *s, uint32_t request)
+{
+    /* SoC-specific peripheral lines converge on this stable request API. */
+    s->last_request = request;
+    s->pending_request = true;
+    if ((s->control & DMA_CTL_REQ_ENABLE) && s->request == request) {
+        dma_write(s, DMA_CTL, s->control | DMA_CTL_START, 4);
+    }
+}
+
+static const VMStateDescription vmstate_tricore_dma = {
+    .name = TYPE_TRICORE_DMA,
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT32(src, TriCoreDMAState), VMSTATE_UINT32(dst, TriCoreDMAState),
+        VMSTATE_UINT32(length, TriCoreDMAState), VMSTATE_UINT32(control, TriCoreDMAState),
+        VMSTATE_UINT32(status, TriCoreDMAState), VMSTATE_UINT32(descriptor, TriCoreDMAState),
+        VMSTATE_UINT32(request, TriCoreDMAState), VMSTATE_UINT32(accen, TriCoreDMAState),
+        VMSTATE_UINT32(error_enable, TriCoreDMAState), VMSTATE_UINT32(priority, TriCoreDMAState),
+        VMSTATE_UINT32(last_request, TriCoreDMAState), VMSTATE_UINT32(bytes_done, TriCoreDMAState),
+        VMSTATE_BOOL(active, TriCoreDMAState), VMSTATE_BOOL(pending_request, TriCoreDMAState),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
+static const MemoryRegionOps dma_ops = { .read = dma_read, .write = dma_write,
+    .endianness = DEVICE_LITTLE_ENDIAN, .valid.min_access_size = 4,
+    .valid.max_access_size = 4 };
+
+static void dma_init(Object *obj)
+{
+    TriCoreDMAState *s = TRICORE_DMA(obj);
+    memory_region_init_io(&s->iomem, obj, &dma_ops, s, "tricore-dma", 0x1000);
+    sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
+    sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq);
+}
+
+static void dma_reset(DeviceState *dev)
+{
+    TriCoreDMAState *s = TRICORE_DMA(dev);
+    s->src = s->dst = s->length = s->control = s->status = 0;
+    s->descriptor = s->request = 0;
+    s->last_request = s->bytes_done = 0;
+    s->active = s->pending_request = false;
+    s->accen = 0xffffffffu;
+    s->error_enable = DMA_STAT_ACCESS_ERROR | DMA_STAT_BUS_ERROR;
+    s->priority = 0;
+}
+
+static void dma_class_init(ObjectClass *klass, const void *data)
+{
+    device_class_set_legacy_reset(DEVICE_CLASS(klass), dma_reset);
+    DEVICE_CLASS(klass)->vmsd = &vmstate_tricore_dma;
+}
+
+static const TypeInfo dma_type = { .name = TYPE_TRICORE_DMA,
+    .parent = TYPE_SYS_BUS_DEVICE, .instance_size = sizeof(TriCoreDMAState),
+    .instance_init = dma_init, .class_init = dma_class_init };
+static void dma_register_types(void) { type_register_static(&dma_type); }
+type_init(dma_register_types)

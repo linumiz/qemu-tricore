@@ -32,6 +32,13 @@
 #include "hw/intc/tricore_ir.h"
 #include "hw/timer/tricore_stm.h"
 #include "hw/char/tricore_asclin.h"
+#include "hw/net/tricore_mcan.h"
+#include "hw/net/tricore_eth.h"
+#include "hw/net/tricore_eray.h"
+#include "hw/dma/tricore_dma.h"
+#include "hw/gpio/tricore_port.h"
+#include "hw/intc/tricore_ici.h"
+#include "hw/misc/tricore_gate.h"
 #include "hw/tricore/tc_soc.h"
 
 #define TYPE_TC27XD_SOC ("tc27xd-soc")
@@ -73,7 +80,15 @@ typedef struct TC27XDSoCState {
     SysBusDevice parent_obj;
 
     /*< public >*/
-    TriCoreCPU cpu;
+    TriCoreCPU cpus[3];
+    struct TC27XCPUControl {
+        struct TC27XDSoCState *soc;
+        unsigned id;
+        MemoryRegion region;
+        uint32_t pc;
+        uint32_t dbgsr;
+    } cpu_ctrl[3];
+    MemoryRegion pmcsr_region;
 
     MemoryRegion dsprX;
     MemoryRegion psprX;
@@ -87,6 +102,15 @@ typedef struct TC27XDSoCState {
     TriCoreSCUState *scu;
     TriCoreSTMState *stm;
     TriCoreASCLINState *asclin;
+    TriCoreASCLINState *asclin_extra[3];
+    TriCoreMCANState *mcan;
+    TriCoreETHState *eth;
+    TriCoreERAYState *eray;
+    TriCoreDMAState *dma;
+    TriCorePortState *port;
+    TriCoreICIState *ici;
+    TriCoreGateState *gate;
+    CanBusState *canbus;
     TriCoreSFRState *sfr;
 
     TC27XDSoCFlashMemState flashmem;
@@ -100,6 +124,11 @@ typedef struct TC27XDSoCClass {
     const char *cpu_type;
     const MemmapEntry *memmap;
     uint32_t num_cpus;
+    uint32_t ir_num_isps;
+    uint32_t dspr_size[3];
+    uint32_t pspr_size[3];
+    uint32_t pflash0_size;
+    uint32_t pflash1_size;
 } TC27XDSoCClass;
 
 #define TC27XD_MEMDEV_CPU(n) \
@@ -136,6 +165,7 @@ enum {
     TC27XD_SCU,
     TC27XD_STM,
     TC27XD_ASCLIN,
+    TC27XD_MCAN,
 };
 
 #endif

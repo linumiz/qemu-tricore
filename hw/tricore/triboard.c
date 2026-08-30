@@ -31,6 +31,7 @@
 #include "hw/tricore/tc39xb_soc.h"
 #include "hw/tricore/tc4dx_soc.h"
 #include "hw/tricore/triboard.h"
+#include "system/address-spaces.h"
 
 static void tricore_load_kernel(TriCoreCPU *cpu, const char *kernel_filename)
 {
@@ -48,8 +49,49 @@ static void tricore_load_kernel(TriCoreCPU *cpu, const char *kernel_filename)
     env->PC = entry;
 }
 
+typedef struct TC277LoadContext {
+    TC27XDSoCState *soc;
+    uint64_t core_start[3];
+} TC277LoadContext;
+static TC277LoadContext *tc277_load_context;
+
+static void tc277_capture_symbol(const char *name, int info, uint64_t value,
+                                 uint64_t size)
+{
+    TC277LoadContext *ctx = tc277_load_context;
+    if (!ctx) return;
+    if (!strcmp(name, "_Core1_start")) ctx->core_start[1] = value;
+    if (!strcmp(name, "_Core2_start")) ctx->core_start[2] = value;
+}
+
+static void tc277_load_multicore_kernel(TC27XDSoCState *soc,
+                                        const char *kernel_filename)
+{
+    TC27XDSoCClass *sc = TC27XD_SOC_GET_CLASS(soc);
+    TC277LoadContext ctx = { .soc = soc };
+    uint64_t entry;
+    tc277_load_context = &ctx;
+    if (load_elf_ram_sym(kernel_filename, NULL, NULL, NULL, &entry, NULL,
+                         NULL, NULL, ELFDATA2LSB, EM_TRICORE, 1, 0,
+                         &address_space_memory, false, tc277_capture_symbol) < 0) {
+        error_report("no kernel file '%s'", kernel_filename);
+        exit(1);
+    }
+    tc277_load_context = NULL;
+    soc->cpus[0].env.PC = entry;
+    for (unsigned i = 1; i < sc->num_cpus; i++) {
+        if (ctx.core_start[i]) {
+            soc->cpus[i].env.PC = ctx.core_start[i];
+            CPUState *cs = CPU(&soc->cpus[i]);
+            cs->halted = 0;
+            cpu_resume(cs);
+        }
+    }
+}
+
 static void triboard_machine_tc4d7_init(MachineState *machine)
 {
+    TriBoardMachineState *ms = TRIBOARD_MACHINE(machine);
     DeviceState *dev;
     Clock *fosc;
 
@@ -60,6 +102,10 @@ static void triboard_machine_tc4d7_init(MachineState *machine)
     dev = qdev_new("tc4d7-soc");
     object_property_add_child(OBJECT(machine), "soc", OBJECT(dev));
     qdev_connect_clock_in(dev, "fosc", fosc);
+    if (ms->canbus) {
+        object_property_set_link(OBJECT(dev), "canbus",
+                                 OBJECT(ms->canbus), &error_fatal);
+    }
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
 
     if (machine->kernel_filename) {
@@ -85,10 +131,15 @@ static void triboard_machine_tc27xd_init(MachineState *machine)
 
     object_initialize_child(OBJECT(machine), "tc27xd_soc", &ms->tc27xd_soc,
                             amc->soc_name);
+    if (ms->canbus) {
+        object_property_set_link(OBJECT(&ms->tc27xd_soc), "canbus",
+                                 OBJECT(ms->canbus), &error_fatal);
+    }
     sysbus_realize(SYS_BUS_DEVICE(&ms->tc27xd_soc), &error_fatal);
 
     if (machine->kernel_filename) {
-        tricore_load_kernel(&ms->tc27xd_soc.cpu, machine->kernel_filename);
+        tc277_load_multicore_kernel(&ms->tc27xd_soc,
+                                    machine->kernel_filename);
     }
 }
 
@@ -99,10 +150,14 @@ static void triboard_machine_tc39xb_init(MachineState *machine)
 
     object_initialize_child(OBJECT(machine), "tc39xb_soc", &ms->tc39xb_soc,
                             amc->soc_name);
+    if (ms->canbus) {
+        object_property_set_link(OBJECT(&ms->tc39xb_soc), "canbus",
+                                 OBJECT(ms->canbus), &error_fatal);
+    }
     sysbus_realize(SYS_BUS_DEVICE(&ms->tc39xb_soc), &error_fatal);
 
     if (machine->kernel_filename) {
-        tricore_load_kernel(&ms->tc39xb_soc.cpu, machine->kernel_filename);
+        tricore_load_kernel(&ms->tc39xb_soc.cpus[0], machine->kernel_filename);
     }
 }
 
@@ -114,9 +169,31 @@ static void triboard_machine_tc277d_class_init(ObjectClass *oc,
 
     mc->init = triboard_machine_tc27xd_init;
     mc->desc = "Infineon AURIX TriBoard TC277 (D-Step)";
-    mc->max_cpus = 1;
+    mc->max_cpus = 3;
     amc->soc_name = "tc277d-soc";
 };
+
+static void triboard_machine_tc26b_class_init(ObjectClass *oc,
+                                               const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+    TriBoardMachineClass *amc = TRIBOARD_MACHINE_CLASS(oc);
+    mc->init = triboard_machine_tc27xd_init;
+    mc->desc = "Infineon AURIX TriBoard TC26x (B-Step)";
+    mc->max_cpus = 2;
+    amc->soc_name = "tc26b-soc";
+}
+
+static void triboard_machine_tc29b_class_init(ObjectClass *oc,
+                                               const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+    TriBoardMachineClass *amc = TRIBOARD_MACHINE_CLASS(oc);
+    mc->init = triboard_machine_tc27xd_init;
+    mc->desc = "Infineon AURIX TriBoard TC29x (B-Step)";
+    mc->max_cpus = 3;
+    amc->soc_name = "tc29b-soc";
+}
 
 static void triboard_machine_tc397b_class_init(ObjectClass *oc,
                                                const void *data)
@@ -126,9 +203,17 @@ static void triboard_machine_tc397b_class_init(ObjectClass *oc,
 
     mc->init = triboard_machine_tc39xb_init;
     mc->desc = "Infineon AURIX TriBoard TC397 (B-Step)";
-    mc->max_cpus = 1;
+    mc->max_cpus = 6;
     amc->soc_name = "tc397b-soc";
 };
+
+static void triboard_machine_class_init(ObjectClass *oc, const void *data)
+{
+    object_class_property_add_link(oc, "canbus", TYPE_CAN_BUS,
+                                   offsetof(TriBoardMachineState, canbus),
+                                   object_property_allow_set_link,
+                                   OBJ_PROP_LINK_STRONG);
+}
 
 static const TypeInfo triboard_machine_types[] = {
     {
@@ -137,6 +222,7 @@ static const TypeInfo triboard_machine_types[] = {
         .instance_size = sizeof(TriBoardMachineState),
         .class_size = sizeof(TriBoardMachineClass),
         .abstract = true,
+        .class_init = triboard_machine_class_init,
     },
     {
         .name = MACHINE_TYPE_NAME("KIT_AURIX_TC277_TRB"),
@@ -149,8 +235,18 @@ static const TypeInfo triboard_machine_types[] = {
         .class_init = triboard_machine_tc397b_class_init,
     },
     {
+        .name = MACHINE_TYPE_NAME("KIT_AURIX_TC26B_TRB"),
+        .parent = TYPE_TRIBOARD_MACHINE,
+        .class_init = triboard_machine_tc26b_class_init,
+    },
+    {
+        .name = MACHINE_TYPE_NAME("KIT_AURIX_TC29B_TRB"),
+        .parent = TYPE_TRIBOARD_MACHINE,
+        .class_init = triboard_machine_tc29b_class_init,
+    },
+    {
         .name = MACHINE_TYPE_NAME("KIT_A3G_TC4D7_LITE"),
-        .parent = TYPE_MACHINE,
+        .parent = TYPE_TRIBOARD_MACHINE,
         .class_init = triboard_machine_tc4d7_class_init,
     },
 };

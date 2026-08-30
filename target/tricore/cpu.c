@@ -28,6 +28,8 @@
 #include "accel/tcg/cpu-ops.h"
 #include "cpu-qom.h"
 
+extern const VMStateDescription vmstate_tricore_cpu;
+
 static inline void set_feature(CPUTriCoreState *env, int feature)
 {
     env->features |= 1ULL << feature;
@@ -310,6 +312,7 @@ static void tricore_cpu_class_init(ObjectClass *c, const void *data)
     cc->get_pc = tricore_cpu_get_pc;
     cc->sysemu_ops = &tricore_sysemu_ops;
     cc->tcg_ops = &tricore_tcg_ops;
+    dc->vmsd = &vmstate_tricore_cpu;
 }
 
 static void tricore_cpu_instance_init(Object *obj)

@@ -29,6 +29,60 @@
 
 #include "hw/tricore/tc39xb_soc.h"
 #include "hw/tricore/triboard.h"
+#include "qemu/log.h"
+
+static uint64_t tc39x_cpu_sfr_read(void *opaque, hwaddr offset,
+                                   unsigned size)
+{
+    TC39XBCPUSFRState *s = opaque;
+    switch (offset) {
+    case 0x1FE08: return s->boot_pc;
+    case 0x1FE60: return s->bootcon;
+    case 0x1FE14: return s->syscon;
+    default: return 0;
+    }
+}
+
+static void tc39x_cpu_sfr_write(void *opaque, hwaddr offset,
+                                uint64_t value, unsigned size)
+{
+    TC39XBCPUSFRState *s = opaque;
+    switch (offset) {
+    case 0x1FE08:
+        s->boot_pc = value;
+        break;
+    case 0x1FE60:
+        s->bootcon = value;
+        if (!(value & (1u << 24)) && s->id > 0) {
+            CPUState *cs = CPU(&s->soc->cpus[s->id]);
+            s->soc->cpus[s->id].env.PC = s->boot_pc;
+            cs->halted = 0;
+            cpu_resume(cs);
+        }
+        break;
+    case 0x1FE14:
+        s->syscon = value;
+        /* BHALT is bit 24 in CPUx_SYSCON.  Clearing it releases the
+         * secondary core after the SSW has programmed CPUx_PC. */
+        if (!(value & (1u << 24)) && s->id > 0) {
+            CPUState *cs = CPU(&s->soc->cpus[s->id]);
+            s->soc->cpus[s->id].env.PC = s->boot_pc;
+            cs->halted = 0;
+            cpu_resume(cs);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+static const MemoryRegionOps tc39x_cpu_sfr_ops = {
+    .read = tc39x_cpu_sfr_read,
+    .write = tc39x_cpu_sfr_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid.min_access_size = 1,
+    .valid.max_access_size = 4,
+};
 
 
 const MemmapEntry tc39xb_soc_memmap[] = {
@@ -247,6 +301,17 @@ static void tc39x_soc_init_memory_mapping(DeviceState *dev_soc)
 #define TC3X_SRC_ASCLIN0_TX     0x14
 #define TC3X_SRC_ASCLIN0_RX     0x15
 #define TC3X_SRC_ASCLIN0_ERR    0x16
+/* Public TC3x ERAY0/ERAY1 service-request slots. */
+#define TC3X_SRC_ERAY0_INT0     160
+#define TC3X_SRC_ERAY0_INT1     161
+#define TC3X_SRC_ERAY1_INT0     162
+#define TC3X_SRC_ERAY1_INT1     163
+/* Generation-specific ERAY service-request table from the public TC3x
+ * User Manual / IfxEray headers. */
+static const uint16_t tc3x_eray_src[2][2] = {
+    { TC3X_SRC_ERAY0_INT0, TC3X_SRC_ERAY0_INT1 },
+    { TC3X_SRC_ERAY1_INT0, TC3X_SRC_ERAY1_INT1 },
+};
 
 static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
 {
@@ -256,45 +321,94 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
 
     s->irbus = TRICORE_IR(object_new(TYPE_TRICORE_IR));
     s->asclin = TRICORE_ASCLIN(object_new(TYPE_TRICORE_ASCLIN));
+    for (unsigned i = 0; i < 11; i++) {
+        s->asclin_extra[i] = TRICORE_ASCLIN(object_new(TYPE_TRICORE_ASCLIN));
+    }
     s->virt = TRICORE_VIRT(object_new(TYPE_TRICORE_VIRT));
     s->scu = TRICORE_SCU(object_new(TYPE_TRICORE_SCU));
     s->stm = TRICORE_STM(object_new(TYPE_TRICORE_STM));
     s->sfr = TRICORE_SFR(object_new(TYPE_TRICORE_SFR));
+    for (unsigned i = 0; i < 3; i++) {
+        s->mcan[i] = TRICORE_MCAN(object_new(TYPE_TRICORE_MCAN));
+    }
+    s->eth = TRICORE_ETH(object_new(TYPE_TRICORE_GETH));
+    for (unsigned i = 0; i < 2; i++) {
+        s->eray[i] = TRICORE_ERAY(object_new(TYPE_TRICORE_ERAY));
+        /* TC3x public profile exposes a 16 KiB ERAY message window. */
+        qdev_prop_set_uint32(DEVICE(s->eray[i]), "message-ram-size", 0x4000);
+        qdev_prop_set_uint32(DEVICE(s->eray[i]), "payload-max", 64);
+    }
 
     /* Parent all devices so sysbus_realize_and_unref does not free them */
     object_property_add_child(OBJECT(dev_soc), "irbus", OBJECT(s->irbus));
     object_property_add_child(OBJECT(dev_soc), "asclin", OBJECT(s->asclin));
+    for (unsigned i = 0; i < 11; i++) {
+        char *name = g_strdup_printf("asclin%u", i + 1);
+        object_property_add_child(OBJECT(dev_soc), name,
+                                   OBJECT(s->asclin_extra[i]));
+        g_free(name);
+    }
     object_property_add_child(OBJECT(dev_soc), "virt", OBJECT(s->virt));
     object_property_add_child(OBJECT(dev_soc), "scu", OBJECT(s->scu));
     object_property_add_child(OBJECT(dev_soc), "stm", OBJECT(s->stm));
     object_property_add_child(OBJECT(dev_soc), "sfr", OBJECT(s->sfr));
+    for (unsigned i = 0; i < 3; i++) {
+        char *name = g_strdup_printf("mcan%u", i);
+        object_property_add_child(OBJECT(dev_soc), name,
+                                  OBJECT(s->mcan[i]));
+        g_free(name);
+    }
+    object_property_add_child(OBJECT(dev_soc), "eth", OBJECT(s->eth));
+    for (unsigned i = 0; i < 2; i++) {
+        char *name = g_strdup_printf("eray%u", i);
+        object_property_add_child(OBJECT(dev_soc), name, OBJECT(s->eray[i]));
+        g_free(name);
+    }
 
     /* IR properties */
     qdev_prop_set_bit(DEVICE(s->irbus), "tc4x-mode", false);
-    qdev_prop_set_uint8(DEVICE(s->irbus), "num-isps", 1);
-    qdev_prop_set_uint16(DEVICE(s->irbus), "num-irqs", 256);
+    qdev_prop_set_uint8(DEVICE(s->irbus), "num-isps", 6);
+    qdev_prop_set_uint16(DEVICE(s->irbus), "num-irqs", 1024);
 
     /* CPU needs IR link before realize */
-    object_property_set_link(OBJECT(&s->cpu), "ir",
+    object_property_set_link(OBJECT(&s->cpus[0]), "ir",
                              OBJECT(s->irbus), &error_abort);
 
-    qdev_realize(DEVICE(&s->cpu), NULL, &err);
+    qdev_realize(DEVICE(&s->cpus[0]), NULL, &err);
     if (err) {
         error_propagate(errp, err);
         return;
+    }
+
+    for (unsigned i = 1; i < 6; i++) {
+        DeviceState *core = DEVICE(&s->cpus[i]);
+        object_property_set_link(OBJECT(core), "ir", OBJECT(s->irbus),
+                                 &error_abort);
+        object_property_set_bool(OBJECT(core), "start-powered-off", true,
+                                 &error_abort);
+        if (!qdev_realize(core, NULL, &err)) {
+            error_propagate(errp, err);
+            return;
+        }
     }
 
     tc39x_soc_init_memory_mapping(dev_soc);
 
     MemoryRegion *sysmem = get_system_memory();
 
-    /* STM clock: fPLL=300MHz / STMDIV=3 = 100MHz */
+    /* TC3x iLLD default: fPLL=300 MHz, STMDIV=3 => fSTM=100 MHz. */
     Clock *fstm = clock_new(OBJECT(dev_soc), "fstm");
-    clock_set_hz(fstm, 50000000);
+    clock_set_hz(fstm, 100000000);
     qdev_connect_clock_in(DEVICE(s->stm), "fstm", fstm);
 
-    object_property_add_const_link(OBJECT(s->scu), "cpu", OBJECT(&s->cpu));
+    object_property_add_const_link(OBJECT(s->scu), "cpu", OBJECT(&s->cpus[0]));
     qdev_prop_set_chr(DEVICE(s->asclin), "chardev", serial_hd(0));
+    if (s->canbus) {
+        for (unsigned i = 0; i < 3; i++) {
+            object_property_set_link(OBJECT(s->mcan[i]), "canbus",
+                                     OBJECT(s->canbus), &error_abort);
+        }
+    }
 
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->sfr), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->scu), &error_fatal);
@@ -302,6 +416,44 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->irbus), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->virt), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->asclin), &error_fatal);
+    for (unsigned i = 0; i < 3; i++) {
+        sysbus_realize_and_unref(SYS_BUS_DEVICE(s->mcan[i]), &error_fatal);
+    }
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->eth), &error_fatal);
+    for (unsigned i = 0; i < 2; i++) {
+        sysbus_realize_and_unref(SYS_BUS_DEVICE(s->eray[i]), &error_fatal);
+    }
+    s->dma = TRICORE_DMA(object_new(TYPE_TRICORE_DMA));
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->dma), &error_fatal);
+    s->port = TRICORE_PORT(object_new(TYPE_TRICORE_PORT));
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->port), &error_fatal);
+    for (unsigned i = 0; i < 11; i++) {
+        DeviceState *extra = DEVICE(s->asclin_extra[i]);
+        qdev_prop_set_chr(extra, "chardev", serial_hd(i + 1));
+        sysbus_realize_and_unref(SYS_BUS_DEVICE(extra), &error_fatal);
+    }
+
+    /* TC3x CPU-local SFRs (including CPUx_KRST0/KRST1) are not modeled yet.
+     * Map the documented local window explicitly so startup accesses are
+     * visible as unimplemented instead of falling through an unmapped hole. */
+    /* TC397B has a hole before CPU5's local window (CPU5 is at F88C0000,
+     * unlike the 0x20000-stepped CPU0..CPU4 windows). */
+    static const hwaddr cpu_sfr_base[] = {
+        0xF8800000, 0xF8820000, 0xF8840000,
+        0xF8860000, 0xF8880000, 0xF88C0000,
+    };
+    for (unsigned i = 0; i < 6; i++) {
+        TC39XBCPUSFRState *sfr = &s->cpu_sfr[i];
+        sfr->soc = s;
+        sfr->id = i;
+        sfr->bootcon = i ? 1 : 0;
+        sfr->syscon = i ? (1u << 24) : 0;
+        char *name = g_strdup_printf("tc39x-cpu%u-local-sfr", i);
+        memory_region_init_io(&sfr->region, OBJECT(s), &tc39x_cpu_sfr_ops,
+                              sfr, name, 0x20000);
+        g_free(name);
+        memory_region_add_subregion(sysmem, cpu_sfr_base[i], &sfr->region);
+    }
 
     /* IR MMIO: idx 0 = int_region (F0037000), idx 1 = src_region (F0038000) */
     sysbus_mmio_map(SYS_BUS_DEVICE(s->irbus), 0, 0xF0037000);
@@ -309,7 +461,11 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
 
     /* IR ISP[0] -> CPU tricore.irq */
     qdev_connect_gpio_out_named(DEVICE(s->irbus), "isp", 0,
-        qdev_get_gpio_in_named(DEVICE(&s->cpu), "tricore.irq", 0));
+        qdev_get_gpio_in_named(DEVICE(&s->cpus[0]), "tricore.irq", 0));
+    for (unsigned i = 1; i < 6; i++) {
+        qdev_connect_gpio_out_named(DEVICE(s->irbus), "isp", i,
+            qdev_get_gpio_in_named(DEVICE(&s->cpus[i]), "tricore.irq", 0));
+    }
 
     /* ASCLIN0: sysbus 0=RXSR, 1=TXSR, 2=EXSR */
     sysbus_connect_irq(SYS_BUS_DEVICE(s->asclin), 0,
@@ -332,6 +488,63 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
                                         &s->sfr->iomem, -1);
     memory_region_add_subregion(sysmem, sc->memmap[TC39XB_ASCLIN].base,
                                 &s->asclin->iomem);
+    /* TC3xx MCMCAN0 control window (iLLD/User Manual base). */
+    static const hwaddr mcan_base[3] = {
+        0xF0200000, 0xF0210000, 0xF0220000,
+    };
+    for (unsigned i = 0; i < 3; i++) {
+        memory_region_add_subregion(sysmem, mcan_base[i],
+                                    &s->mcan[i]->iomem);
+        memory_region_add_subregion(sysmem, mcan_base[i] + 0x3000,
+                                    &s->mcan[i]->msg_ram);
+        /* MCMCAN0..2 expose 16 service requests each.  Keep the controller
+         * channels independent while routing them through the shared IR. */
+        for (unsigned irq = 0; irq < 16; irq++) {
+            sysbus_connect_irq(SYS_BUS_DEVICE(s->mcan[i]), irq,
+                qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                       176 + i * 16 + irq));
+        }
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(s->dma), 0, 0xF0010000);
+    sysbus_mmio_map(SYS_BUS_DEVICE(s->port), 0, 0xF003A000);
+    s->ici = TRICORE_ICI(object_new(TYPE_TRICORE_ICI));
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->ici), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(s->ici), 0, 0xF003B000);
+    for (unsigned i = 0; i < 6; i++)
+        sysbus_connect_irq(SYS_BUS_DEVICE(s->ici), i,
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", 208 + i));
+    s->gate = TRICORE_GATE(object_new(TYPE_TRICORE_GATE));
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->gate), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(s->gate), 0, 0xF003B400);
+    memory_region_add_subregion(sysmem, 0xF001D000, &s->eth->iomem);
+    sysbus_connect_irq(SYS_BUS_DEVICE(s->eth), 0,
+        qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", 175));
+    for (unsigned i = 0; i < 2; i++) {
+        hwaddr base = i ? 0xF0017000 : 0xF001C000;
+        memory_region_add_subregion(sysmem, base, &s->eray[i]->iomem);
+        memory_region_add_subregion(sysmem, base + 0x1000,
+                                    &s->eray[i]->msg_ram);
+        sysbus_connect_irq(SYS_BUS_DEVICE(s->eray[i]), 0,
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                   tc3x_eray_src[i][0]));
+        sysbus_connect_irq(SYS_BUS_DEVICE(s->eray[i]), 1,
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                   tc3x_eray_src[i][1]));
+    }
+    for (unsigned i = 0; i < 11; i++) {
+        memory_region_add_subregion(sysmem,
+            sc->memmap[TC39XB_ASCLIN].base + 0x200 * (i + 1),
+            &s->asclin_extra[i]->iomem);
+        sysbus_connect_irq(SYS_BUS_DEVICE(s->asclin_extra[i]), 0,
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                   TC3X_SRC_ASCLIN0_RX + 3 * (i + 1)));
+        sysbus_connect_irq(SYS_BUS_DEVICE(s->asclin_extra[i]), 1,
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                   TC3X_SRC_ASCLIN0_TX + 3 * (i + 1)));
+        sysbus_connect_irq(SYS_BUS_DEVICE(s->asclin_extra[i]), 2,
+            qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                   TC3X_SRC_ASCLIN0_ERR + 3 * (i + 1)));
+    }
     memory_region_add_subregion(sysmem, sc->memmap[TC39XB_VIRT].base,
                                 &s->virt->iomem);
     memory_region_add_subregion(sysmem, sc->memmap[TC39XB_SCU].base,
@@ -345,14 +558,26 @@ static void tc39x_soc_init(Object *obj)
     TC39XBSoCState *s = TC39XB_SOC(obj);
     TC39XBSoCClass *sc = TC39XB_SOC_GET_CLASS(s);
 
-    object_initialize_child(obj, "tc37x", &s->cpu, sc->cpu_type);
+    object_initialize_child(obj, "tc37x-cpu0", &s->cpus[0], sc->cpu_type);
+    for (unsigned i = 1; i < 6; i++) {
+        char *name = g_strdup_printf("tc37x-cpu%u", i);
+        object_initialize_child(obj, name, &s->cpus[i], sc->cpu_type);
+        g_free(name);
+    }
 }
+
+static Property tc39xb_soc_props[] = {
+    DEFINE_PROP_LINK("canbus", TC39XBSoCState, canbus,
+                     TYPE_CAN_BUS, CanBusState *),
+};
 
 static void tc39x_soc_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = tc39x_soc_realize;
+    device_class_set_props_n(dc, tc39xb_soc_props,
+                             ARRAY_SIZE(tc39xb_soc_props));
 }
 
 static void tc397b_soc_class_init(ObjectClass *oc, const void *data)
@@ -362,7 +587,7 @@ static void tc397b_soc_class_init(ObjectClass *oc, const void *data)
     sc->name         = "tc39xb-soc";
     sc->cpu_type     = TRICORE_CPU_TYPE_NAME("tc3x");
     sc->memmap       = tc39xb_soc_memmap;
-    sc->num_cpus     = 1;
+    sc->num_cpus     = 6;
 }
 
 static const TypeInfo tc39x_soc_types[] = {

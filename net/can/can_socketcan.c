@@ -110,6 +110,15 @@ static void can_host_socketcan_read(void *opaque)
     } else {
         if (c->bufcnt > CAN_MTU) {
             c->buf[0].flags |= QEMU_CAN_FRMF_TYPE_FD;
+            /* CANFD_BRS/ESI use the same bit positions as QEMU's transport
+             * flags; preserve them when crossing the host boundary. */
+            struct canfd_frame *fd = (struct canfd_frame *)c->buf;
+            if (fd->flags & CANFD_BRS) {
+                c->buf[0].flags |= QEMU_CAN_FRMF_BRS;
+            }
+            if (fd->flags & CANFD_ESI) {
+                c->buf[0].flags |= QEMU_CAN_FRMF_ESI;
+            }
         }
     }
 

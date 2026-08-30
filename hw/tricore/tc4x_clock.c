@@ -14,16 +14,42 @@
 #include "hw/core/registerfields.h"
 #include "hw/core/sysbus.h"
 #include "hw/tricore/tc4x_clock.h"
+#include "migration/vmstate.h"
 #include "qapi/error.h"
 #include "qemu/log.h"
 
-#define UPDATE_DIV_CLK(_clk, _freq, _field_reg, _field_name) clock_update(s->_clk, FIELD_EX32(s->_field_reg, _field_reg, _field_name)*_freq)
+/*
+ * TC4x CCU divider fields are encoded indices, not arithmetic divisors.
+ * This is the same lookup table used by the TC4x iLLD (IfxClock): for
+ * example, STMDIV=3 means divide by 3 and STMDIV=8 means divide by 8.
+ */
+static uint32_t tc4x_clock_divisor(uint32_t encoded)
+{
+    static const uint8_t dividers[16] = {
+        1, 1, 2, 3, 4, 5, 6, 6,
+        8, 8, 10, 10, 12, 12, 12, 15,
+    };
+
+    return dividers[encoded & 0xf];
+}
+
+#define UPDATE_DIV_CLK(_clk, _freq, _field_reg, _field_name) \
+    clock_update(s->_clk, (_freq) / tc4x_clock_divisor( \
+        FIELD_EX32(s->_field_reg, _field_reg, _field_name)))
 
 static void tc4x_clock_update_sysccu(TC4xClockState *s)
 {
     UPDATE_DIV_CLK(fspb, clock_get(s->fsource0), SYSCCUCON0, SPBDIV);
     UPDATE_DIV_CLK(fsri, clock_get(s->fsource0), SYSCCUCON0, SRIDIV);
-    UPDATE_DIV_CLK(fstm, clock_get(s->fsource0), SYSCCUCON0, STMDIV);
+    if (FIELD_EX32(s->SYSCCUCON0, SYSCCUCON0, LPDIV) != 0) {
+        /* In low-power mode the STM clock is fixed to fSYS / 120. */
+        clock_update(s->fstm, clock_get(s->fsource0) / 120);
+    } else if (FIELD_EX32(s->SYSCCUCON0, SYSCCUCON0, STMDIV) == 0) {
+        /* STMDIV=0 disables the STM clock (as specified by IfxClock). */
+        clock_update_hz(s->fstm, 0);
+    } else {
+        UPDATE_DIV_CLK(fstm, clock_get(s->fsource0), SYSCCUCON0, STMDIV);
+    }
     UPDATE_DIV_CLK(fsrics, clock_get(s->fsource0), SYSCCUCON0, SRICSDIV);
     UPDATE_DIV_CLK(fgeth, clock_get(s->fsource0), SYSCCUCON1, GETHDIV);
     UPDATE_DIV_CLK(fegtm, clock_get(s->fsource0), SYSCCUCON1, EGTMDIV);
@@ -208,7 +234,8 @@ static uint64_t tc4x_clock_read(void *opaque, hwaddr offset, unsigned size)
         memcpy(&value, (uint8_t *)&s->SYSPLLCON2 + (offset & 0x3), size);
         break;
     case R_SYSPLLSTAT:
-        if (FIELD_EX32(s->SYSPLLCON0, SYSPLLCON0, PLLPWR) == 1) {
+        if (FIELD_EX32(s->SYSPLLCON0, SYSPLLCON0, PLLPWR) == 1 &&
+            clock_get(s->fosc) != 0) {
             temp = R_SYSPLLSTAT_PLLLOCK_MASK | R_SYSPLLCON0_PLLPWR_MASK;
         }
         memcpy(&value, (uint8_t *)&temp + (offset & 0x3), size);
@@ -223,7 +250,8 @@ static uint64_t tc4x_clock_read(void *opaque, hwaddr offset, unsigned size)
         memcpy(&value, (uint8_t *)&s->PERPLLCON2 + (offset & 0x3), size);
         break;
     case R_PERPLLSTAT:
-        if (FIELD_EX32(s->PERPLLCON0, PERPLLCON0, PLLPWR) == 1) {
+        if (FIELD_EX32(s->PERPLLCON0, PERPLLCON0, PLLPWR) == 1 &&
+            clock_get(s->fosc) != 0) {
             temp = R_PERPLLSTAT_PLLLOCK_MASK | R_PERPLLCON0_PLLPWR_MASK;
         }
         memcpy(&value, (uint8_t *)&temp + (offset & 0x3), size);
@@ -353,6 +381,44 @@ static void tc4x_clock_realize(DeviceState *dev, Error **errp)
     tc4x_clock_update_perccu(s);
 }
 
+static int tc4x_clock_post_load(void *opaque, int version_id)
+{
+    TC4xClockState *s = opaque;
+    tc4x_clock_update_freq(s);
+    tc4x_clock_update_sysccu(s);
+    tc4x_clock_update_perccu(s);
+    return 0;
+}
+
+static const VMStateDescription vmstate_tc4x_clock = {
+    .name = "tc4x-clock",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .post_load = tc4x_clock_post_load,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT32(insel, TC4xClockState),
+        VMSTATE_UINT32(clksels, TC4xClockState),
+        VMSTATE_UINT32(clkselp, TC4xClockState),
+        VMSTATE_UINT32(rampfstat, TC4xClockState),
+        VMSTATE_UINT32(OSCCON, TC4xClockState),
+        VMSTATE_UINT32(OSCMON0, TC4xClockState),
+        VMSTATE_UINT32(OSCMON1, TC4xClockState),
+        VMSTATE_UINT32(CCUCON, TC4xClockState),
+        VMSTATE_UINT32(SYSPLLCON0, TC4xClockState),
+        VMSTATE_UINT32(SYSPLLCON1, TC4xClockState),
+        VMSTATE_UINT32(SYSPLLCON2, TC4xClockState),
+        VMSTATE_UINT32(PERPLLCON0, TC4xClockState),
+        VMSTATE_UINT32(PERPLLCON1, TC4xClockState),
+        VMSTATE_UINT32(PERPLLCON2, TC4xClockState),
+        VMSTATE_UINT32(RAMPCON0, TC4xClockState),
+        VMSTATE_UINT32(SYSCCUCON0, TC4xClockState),
+        VMSTATE_UINT32(SYSCCUCON1, TC4xClockState),
+        VMSTATE_UINT32(PERCCUCON0, TC4xClockState),
+        VMSTATE_UINT32(PERCCUCON1, TC4xClockState),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static void tc4x_clock_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
@@ -360,6 +426,7 @@ static void tc4x_clock_class_init(ObjectClass *klass, const void *data)
 
     rc->phases.hold = tc4x_clock_reset;
     dc->realize = tc4x_clock_realize;
+    dc->vmsd = &vmstate_tc4x_clock;
 }
 
 static const TypeInfo tc4x_clock_info = {

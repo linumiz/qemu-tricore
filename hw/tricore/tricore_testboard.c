@@ -110,7 +110,7 @@ static void ttb_machine_init(MachineClass *mc)
 {
     mc->desc = "a minimal TriCore board";
     mc->init = tricoreboard_init;
-    mc->default_cpu_type = TRICORE_CPU_TYPE_NAME("tc1796");
+    mc->default_cpu_type = TRICORE_CPU_TYPE_NAME("tc2x");
 }
 
 DEFINE_MACHINE("tricore_testboard", ttb_machine_init)
