@@ -121,6 +121,20 @@ static void test_eray_profiles(void)
     qtest_clock_step(global_qtest, 1000);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C120) & (1u << 30),
                      !=, 0);
+    /* Deterministic dynamic arbitration: synchronize both nodes to the same
+     * cycle and request the same dynamic slot. */
+    qtest_writel(global_qtest, 0xF441C11c, 2);
+    qtest_writel(global_qtest, 0xF441D11c, 2);
+    qtest_writel(global_qtest, 0xF441D130, 1);
+    qtest_writel(global_qtest, 0xF441E000, 101);
+    qtest_writel(global_qtest, 0xF441C124, 0);
+    qtest_writel(global_qtest, 0xF441C128, 2);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    qtest_writel(global_qtest, 0xF443F000, 101);
+    qtest_writel(global_qtest, 0xF441D124, 0);
+    qtest_writel(global_qtest, 0xF441D128, 2);
+    qtest_writel(global_qtest, 0xF441D128, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D104) & 8, ==, 8);
     /* A frame outside both configured static and dynamic slot ranges is
      * rejected before it can become a pending transmission. */
     qtest_writel(global_qtest, 0xF441C134, 0);
