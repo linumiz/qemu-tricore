@@ -13,7 +13,7 @@ struct TriCoreMCANState {
     qemu_irq irq;
     CanBusClientState bus_client;
     CanBusState *canbus;
-    uint32_t regs[16];
+    uint32_t regs[0x2000 / 4];
     qemu_can_frame rx_frame;
     bool rx_pending;
 };

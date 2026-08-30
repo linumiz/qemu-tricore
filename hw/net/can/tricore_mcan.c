@@ -23,6 +23,15 @@ REG32(RXDATAL, 0x1c)
 REG32(RXDATAH, 0x20)
 REG32(INT_ENABLE, 0x24)
 
+/* TC27D MultiCAN+ register locations (iLLD TC27D_UM_V2.2): Node 0 and
+ * message object 0.  The compact registers above remain as a QEMU-friendly
+ * smoke interface; these aliases let early iLLD code use documented offsets. */
+REG32(NODE0_CR, 0x200)
+REG32(MO0_DATAL, 0x910)
+REG32(MO0_DATAH, 0x914)
+REG32(MO0_AR, 0x918)
+REG32(MO0_CTR, 0x91c)
+
 static void tricore_mcan_update_irq(TriCoreMCANState *s)
 {
     bool active = (s->regs[R_STATUS / 4] & s->regs[R_INT_ENABLE / 4]) != 0;
@@ -49,6 +58,9 @@ static ssize_t tricore_mcan_receive(CanBusClientState *client,
     s->regs[R_RXID / 4] = s->rx_frame.can_id;
     s->regs[R_RXDATAL / 4] = ldl_le_p(&s->rx_frame.data[0]);
     s->regs[R_RXDATAH / 4] = ldl_le_p(&s->rx_frame.data[4]);
+    s->regs[R_MO0_AR / 4] = s->rx_frame.can_id;
+    s->regs[R_MO0_DATAL / 4] = s->regs[R_RXDATAL / 4];
+    s->regs[R_MO0_DATAH / 4] = s->regs[R_RXDATAH / 4];
     s->regs[R_STATUS / 4] |= R_STATUS_RX_PENDING_MASK;
     tricore_mcan_update_irq(s);
     return 1;
@@ -106,10 +118,20 @@ static void tricore_mcan_write(void *opaque, hwaddr addr, uint64_t value,
     if (addr == R_STATUS) {
         s->regs[index] &= ~(uint32_t)value;
     } else if (addr == R_INT_ENABLE || addr == R_CONTROL ||
-               addr == R_TXID || addr == R_TXDATAL || addr == R_TXDATAH) {
+               addr == R_TXID || addr == R_TXDATAL || addr == R_TXDATAH ||
+               addr == R_MO0_AR || addr == R_MO0_DATAL || addr == R_MO0_DATAH) {
         s->regs[index] = value;
     } else if (addr == R_TXCTRL && (value & 1)) {
         tricore_mcan_send(s);
+    } else if (addr == R_MO0_CTR && (value & 1)) {
+        s->regs[R_TXID / 4] = s->regs[R_MO0_AR / 4];
+        s->regs[R_TXDATAL / 4] = s->regs[R_MO0_DATAL / 4];
+        s->regs[R_TXDATAH / 4] = s->regs[R_MO0_DATAH / 4];
+        tricore_mcan_send(s);
+    } else if (addr == R_NODE0_CR) {
+        /* INIT/CCE sequencing is intentionally collapsed to the enable bit
+         * for this first register-oriented implementation. */
+        s->regs[R_CONTROL / 4] = value ? R_CONTROL_ENABLE_MASK : 0;
     }
     tricore_mcan_update_irq(s);
 }
@@ -144,7 +166,7 @@ static void tricore_mcan_init(Object *obj)
     TriCoreMCANState *s = TRICORE_MCAN(obj);
     sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq);
     memory_region_init_io(&s->iomem, obj, &tricore_mcan_ops, s,
-                          TYPE_TRICORE_MCAN, 0x100);
+                          TYPE_TRICORE_MCAN, 0x2000);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
 }
 
@@ -153,7 +175,7 @@ static const VMStateDescription vmstate_tricore_mcan = {
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT32_ARRAY(regs, TriCoreMCANState, 16),
+        VMSTATE_UINT32_ARRAY(regs, TriCoreMCANState, 0x2000 / 4),
         VMSTATE_UINT32(rx_frame.can_id, TriCoreMCANState),
         VMSTATE_UINT8(rx_frame.can_dlc, TriCoreMCANState),
         VMSTATE_UINT8(rx_frame.flags, TriCoreMCANState),
