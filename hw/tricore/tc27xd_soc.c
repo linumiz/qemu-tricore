@@ -276,6 +276,9 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     s->mcan = TRICORE_MCAN(object_new(TYPE_TRICORE_MCAN));
     s->eth = TRICORE_ETH(object_new(TYPE_TRICORE_ETH));
     s->eray = TRICORE_ERAY(object_new(TYPE_TRICORE_ERAY));
+    /* TC2x public profile: 8 KiB ERAY message RAM, 64-byte fixture payload. */
+    qdev_prop_set_uint32(DEVICE(s->eray), "message-ram-size", 0x2000);
+    qdev_prop_set_uint32(DEVICE(s->eray), "payload-max", 64);
 
     object_property_add_child(OBJECT(dev_soc), "irbus", OBJECT(s->irbus));
     object_property_add_child(OBJECT(dev_soc), "asclin", OBJECT(s->asclin));

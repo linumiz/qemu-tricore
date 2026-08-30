@@ -44,6 +44,9 @@ typedef struct TriCoreERAYState {
     uint32_t slot_counter, minislot_counter;
     uint32_t tx_frame_id, tx_due_cycle, tx_due_slot, tx_payload_len;
     uint32_t tx_header_flags;
+    /* Profile-selected limits; defaults preserve the portable fixture. */
+    uint32_t payload_max;
+    uint32_t msg_ram_size;
     bool tx_pending;
     uint8_t tx_frame[64];
     QEMUTimer *scheduler;

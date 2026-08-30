@@ -206,6 +206,10 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
     static const hwaddr eray_base[2] = { 0xF441C000, 0xF441D000 };
     for (i = 0; i < 2; i++) {
         dev = DEVICE(&s->eray[i]);
+        /* TC4x public profile uses a 16 KiB message window and the portable
+         * 64-byte payload fixture. */
+        qdev_prop_set_uint32(dev, "message-ram-size", 0x4000);
+        qdev_prop_set_uint32(dev, "payload-max", 64);
         if (!sysbus_realize(SYS_BUS_DEVICE(dev), errp)) {
             return;
         }

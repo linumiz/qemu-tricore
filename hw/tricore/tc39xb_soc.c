@@ -334,6 +334,9 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     s->eth = TRICORE_ETH(object_new(TYPE_TRICORE_GETH));
     for (unsigned i = 0; i < 2; i++) {
         s->eray[i] = TRICORE_ERAY(object_new(TYPE_TRICORE_ERAY));
+        /* TC3x public profile exposes a 16 KiB ERAY message window. */
+        qdev_prop_set_uint32(DEVICE(s->eray[i]), "message-ram-size", 0x4000);
+        qdev_prop_set_uint32(DEVICE(s->eray[i]), "payload-max", 64);
     }
 
     /* Parent all devices so sysbus_realize_and_unref does not free them */

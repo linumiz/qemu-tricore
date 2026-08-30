@@ -12,6 +12,7 @@
 #include "qemu/osdep.h"
 #include "hw/net/tricore_eray.h"
 #include "hw/core/irq.h"
+#include "hw/core/qdev-properties.h"
 #include "qapi/error.h"
 #include "migration/vmstate.h"
 
@@ -266,7 +267,8 @@ static void eray_commit_message(TriCoreERAYState *s)
      * explicit cycle selector and must match the controller's current cycle.
      * These checks are derived from the public ERAY manuals/iLLD headers and
      * keep malformed host fixtures from entering the virtual bus. */
-    if ((frame_id & ~0x7ffu) || encoded_payload_len > sizeof(s->tx_frame) ||
+    if ((frame_id & ~0x7ffu) || encoded_payload_len > s->payload_max ||
+        encoded_payload_len > sizeof(s->tx_frame) ||
         (header_flags & ~ERAY_HDR_PUBLIC_MASK) ||
         (null_frame && (encoded_payload_len != 0 || sync_frame ||
                         startup_frame)) ||
@@ -278,7 +280,7 @@ static void eray_commit_message(TriCoreERAYState *s)
         eray_update_irq(s);
         return;
     }
-    if (!(s->mbctrl & MBCTRL_COMMIT) || offset + 64 > sizeof(s->msg_data)) {
+    if (!(s->mbctrl & MBCTRL_COMMIT) || offset + 64 > s->msg_ram_size) {
         s->ccev |= CCEV_HEADER_ERROR;
         return;
     }
@@ -597,6 +599,8 @@ static void eray_reset(DeviceState *dev)
 static void eray_init(Object *obj)
 {
     TriCoreERAYState *s = TRICORE_ERAY(obj);
+    s->payload_max = 64;
+    s->msg_ram_size = sizeof(s->msg_data);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->msg_ram);
     sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->int0_irq);
@@ -606,16 +610,26 @@ static void eray_init(Object *obj)
 static void eray_realize(DeviceState *dev, Error **errp)
 {
     TriCoreERAYState *s = TRICORE_ERAY(dev);
+    s->msg_ram_size = MIN((uint32_t)sizeof(s->msg_data),
+                          MAX(64u, s->msg_ram_size));
+    s->payload_max = MIN((uint32_t)sizeof(s->tx_frame),
+                         MAX(1u, s->payload_max));
     g_autofree char *ram_name = g_strdup_printf("tricore-eray-msg-ram-%p", s);
     memory_region_init_io(&s->iomem, OBJECT(dev), &eray_ops, s,
                           "tricore-eray", 0x1000);
     /* Use the state-owned buffer as RAM backing so firmware writes are visible
      * to the message handler and the same bytes are included in migration. */
     memory_region_init_ram_ptr(&s->msg_ram, OBJECT(dev), ram_name,
-                               sizeof(s->msg_data), s->msg_data);
+                               s->msg_ram_size, s->msg_data);
     s->scheduler = timer_new_ns(QEMU_CLOCK_VIRTUAL, eray_scheduler_cb, s);
     QTAILQ_INSERT_TAIL(&eray_bus, s, bus_node);
 }
+
+static const Property eray_properties[] = {
+    DEFINE_PROP_UINT32("payload-max", TriCoreERAYState, payload_max, 64),
+    DEFINE_PROP_UINT32("message-ram-size", TriCoreERAYState, msg_ram_size,
+                       sizeof(((TriCoreERAYState *)0)->msg_data)),
+};
 
 static void eray_unrealize(DeviceState *dev)
 {
@@ -646,6 +660,8 @@ static const VMStateDescription vmstate_eray = {
         VMSTATE_UINT32(command, TriCoreERAYState), VMSTATE_UINT32(cycle, TriCoreERAYState),
         VMSTATE_UINT32(slot_status, TriCoreERAYState), VMSTATE_UINT32(mbid, TriCoreERAYState),
         VMSTATE_UINT32(mbctrl, TriCoreERAYState), VMSTATE_TIMER_PTR(scheduler, TriCoreERAYState),
+        VMSTATE_UINT32(payload_max, TriCoreERAYState),
+        VMSTATE_UINT32(msg_ram_size, TriCoreERAYState),
         VMSTATE_UINT32(static_slots, TriCoreERAYState), VMSTATE_UINT32(dynamic_start, TriCoreERAYState),
         VMSTATE_UINT32(minislot, TriCoreERAYState), VMSTATE_UINT32(guardian, TriCoreERAYState),
         VMSTATE_UINT32(channel_mask, TriCoreERAYState),
@@ -686,6 +702,7 @@ static void eray_class_init(ObjectClass *klass, const void *data)
     dc->unrealize = eray_unrealize;
     device_class_set_legacy_reset(dc, eray_reset);
     dc->vmsd = &vmstate_eray;
+    device_class_set_props(dc, eray_properties);
 }
 
 static const TypeInfo eray_info = {
