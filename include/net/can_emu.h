@@ -117,6 +117,11 @@ ssize_t can_bus_client_send(CanBusClientState *,
                             const struct qemu_can_frame *frames,
                             size_t frames_cnt);
 
+/* Schedule delivery after a virtual-time delay (nanoseconds). */
+ssize_t can_bus_client_send_timed(CanBusClientState *,
+                                  const struct qemu_can_frame *frames,
+                                  size_t frames_cnt, uint64_t delay_ns);
+
 int can_bus_client_set_filters(CanBusClientState *,
                                const struct qemu_can_filter *filters,
                                size_t filters_cnt);

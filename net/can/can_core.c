@@ -32,6 +32,7 @@
 #include "qapi/error.h"
 #include "net/can_emu.h"
 #include "qom/object_interfaces.h"
+#include "qemu/timer.h"
 
 /* CAN DLC to real data length conversion helpers */
 
@@ -73,13 +74,41 @@ struct CanBusState {
     Object object;
 
     QTAILQ_HEAD(, CanBusClientState) clients;
+    QEMUTimer *event_timer;
+    CanBusClientState *event_sender;
+    qemu_can_frame event_frame;
+    size_t event_count;
 };
+
+static ssize_t can_bus_dispatch(CanBusState *bus, CanBusClientState *client,
+                                const qemu_can_frame *frames, size_t frames_cnt)
+{
+    int ret = 0;
+    CanBusClientState *peer;
+    QTAILQ_FOREACH(peer, &bus->clients, next) {
+        if (peer != client && peer->info->can_receive(peer) &&
+            peer->info->receive(peer, frames, frames_cnt) > 0) {
+            ret = 1;
+        }
+    }
+    return ret;
+}
+
+static void can_bus_event_cb(void *opaque)
+{
+    CanBusState *bus = opaque;
+    can_bus_dispatch(bus, bus->event_sender, &bus->event_frame,
+                     bus->event_count);
+    bus->event_sender = NULL;
+    bus->event_count = 0;
+}
 
 static void can_bus_instance_init(Object *object)
 {
     CanBusState *bus = (CanBusState *)object;
 
     QTAILQ_INIT(&bus->clients);
+    bus->event_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, can_bus_event_cb, bus);
 }
 
 int can_bus_insert_client(CanBusState *bus, CanBusClientState *client)
@@ -104,26 +133,30 @@ int can_bus_remove_client(CanBusClientState *client)
 ssize_t can_bus_client_send(CanBusClientState *client,
              const struct qemu_can_frame *frames, size_t frames_cnt)
 {
-    int ret = 0;
     CanBusState *bus = client->bus;
-    CanBusClientState *peer;
     if (bus == NULL) {
         return -1;
     }
 
-    QTAILQ_FOREACH(peer, &bus->clients, next) {
-        if (peer->info->can_receive(peer)) {
-            if (peer == client) {
-                /* No loopback support for now */
-                continue;
-            }
-            if (peer->info->receive(peer, frames, frames_cnt) > 0) {
-                ret = 1;
-            }
-        }
-    }
+    return can_bus_dispatch(bus, client, frames, frames_cnt);
+}
 
-    return ret;
+ssize_t can_bus_client_send_timed(CanBusClientState *client,
+                                  const qemu_can_frame *frames,
+                                  size_t frames_cnt, uint64_t delay_ns)
+{
+    CanBusState *bus = client->bus;
+    if (!bus || !frames_cnt || frames_cnt > 1 || bus->event_sender) {
+        return -1;
+    }
+    /* The scheduler is deliberately transport-level: controllers provide the
+     * delay computed from their nominal/data bit timing, while legacy users
+     * continue to use atomic can_bus_client_send(). */
+    bus->event_sender = client;
+    bus->event_frame = frames[0];
+    bus->event_count = 1;
+    timer_mod_ns(bus->event_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + delay_ns);
+    return 0;
 }
 
 int can_bus_filter_match(struct qemu_can_filter *filter, qemu_canid_t can_id)
