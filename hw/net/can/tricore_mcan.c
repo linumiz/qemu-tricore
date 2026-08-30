@@ -138,6 +138,11 @@ static ssize_t tricore_mcan_receive(CanBusClientState *client,
         s->regs[MO_REG(target, R_MO0_AR) / 4] = s->rx_frame.can_id;
         s->regs[MO_REG(target, R_MO0_DATAL) / 4] = s->regs[R_RXDATAL / 4];
         s->regs[MO_REG(target, R_MO0_DATAH) / 4] = s->regs[R_RXDATAH / 4];
+        /* A gateway write creates a pending destination object as it would
+         * on hardware, allowing firmware to consume the mirrored frame via
+         * the normal MSPND/FIFO acknowledgement path. */
+        s->object_valid[target] = true;
+        s->object_pending[target] = true;
         s->regs[R_STATUS / 4] |= R_STATUS_GATEWAY_EVENT_MASK;
     }
     s->regs[R_STATUS / 4] |= R_STATUS_RX_PENDING_MASK;
