@@ -1,8 +1,10 @@
 /*
  * Public-source provenance: this interface mirrors only structures and
- * behavior described by the public AURIX User Manuals and the accompanying
- * Infineon iLLD IfxEth_/IfxGeth_/IfxLeth_ headers.  No NDA-only material or
- * proprietary vendor implementation is required by this model.
+ * behavior described by the public AURIX User Manuals and the Infineon iLLD
+ * IfxEth_/IfxGeth_/IfxLeth_ headers published on GitHub.  Local copies of
+ * those headers are kept in the workspace for reference and are not QEMU
+ * project-provided source material.  No NDA-only material or proprietary
+ * vendor implementation is required by this model.
  */
 #ifndef HW_NET_TRICORE_ETH_H
 #define HW_NET_TRICORE_ETH_H
