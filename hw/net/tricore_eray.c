@@ -670,6 +670,8 @@ static const VMStateDescription vmstate_eray = {
         VMSTATE_UINT32(fifo_tail, TriCoreERAYState), VMSTATE_UINT32(fifo_critical, TriCoreERAYState),
         VMSTATE_UINT32(host_busy, TriCoreERAYState), VMSTATE_UINT32(shadow_busy, TriCoreERAYState),
         VMSTATE_UINT32(unlock_key, TriCoreERAYState),
+        /* Channel-A/B ownership and pending indicators are migrated as one
+         * atomic group so a destination cannot observe a half-restored bus. */
         VMSTATE_UINT32_ARRAY(host_busy_ch, TriCoreERAYState, 2),
         VMSTATE_UINT32_ARRAY(shadow_busy_ch, TriCoreERAYState, 2),
         VMSTATE_UINT32_ARRAY(unlock_key_ch, TriCoreERAYState, 2),
