@@ -69,12 +69,14 @@ static void test_eray_profiles(void)
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D160), ==, 2);
     /* Scheduled commit is held until the next virtual macrocycle tick. */
     qtest_writel(global_qtest, 0xF441D114, 0xffffffff);
+    qtest_writel(global_qtest, 0xF441D0f4, 0xffffffff);
+    qtest_writel(global_qtest, 0xF441D0f0, 0xffffffff);
     qtest_writel(global_qtest, 0xF441C130, 1);
     qtest_writel(global_qtest, 0xF441E000, 101);
     qtest_writel(global_qtest, 0xF441C128, 1);
-    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D114), ==, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D12c), ==, 0);
     qtest_clock_step(global_qtest, 1000);
-    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D114), !=, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D12c), !=, 0);
     qtest_quit(global_qtest);
 }
 

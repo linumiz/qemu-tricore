@@ -21,6 +21,8 @@
 #define ERAY_NEMC      0x10c
 #define ERAY_MBSC1     0x110
 #define ERAY_NDAT1     0x114
+#define ERAY_MBSC0     0x0f0
+#define ERAY_NDAT0     0x0f4
 #define ERAY_CMD       0x118
 #define ERAY_CYCLE     0x11c
 #define ERAY_SLOTSTAT  0x120
@@ -42,6 +44,11 @@
 #define ERAY_FCL 0x160
 #define ERAY_FILTER_ID 0x164
 #define ERAY_FILTER_CYCLE 0x168
+#define ERAY_MHDS 0x16c
+#define ERAY_FSR_TAIL 0x170
+#define ERAY_FSR_CRIT 0x174
+#define ERAY_IRQ0_MASK 0x178
+#define ERAY_IRQ1_MASK 0x17c
 
 #define CCSV_POC_SHIFT 0
 #define CCSV_POC_MASK  0x3f
@@ -93,8 +100,9 @@ static void eray_schedule(TriCoreERAYState *s)
 
 static void eray_update_irq(TriCoreERAYState *s)
 {
-    qemu_set_irq(s->int0_irq, !!(s->ccev & 0xffff));
-    qemu_set_irq(s->int1_irq, !!(s->mbsc1 | s->ndat1));
+    qemu_set_irq(s->int0_irq, !!((s->ccev & 0xffff) & ~s->irq0_mask));
+    qemu_set_irq(s->int1_irq, !!((s->mbsc0 | s->mbsc1 | s->ndat0 | s->ndat1) &
+                                 ~s->irq1_mask));
 }
 
 static void eray_command(TriCoreERAYState *s, uint32_t cmd)
@@ -170,6 +178,7 @@ static void eray_commit_message(TriCoreERAYState *s)
         s->tx_payload_len = payload_len;
         s->tx_pending = true;
         s->mbsc1 |= BIT(s->mbid & 31);
+        s->shadow_busy = 1;
         eray_update_irq(s);
         return;
     }
@@ -213,20 +222,35 @@ static void eray_deliver_frame(TriCoreERAYState *s, uint32_t frame_id,
                 head = (head + 1) % peer->fifo_depth;
                 count++;
                 peer->fifo_status = head | (count << 8);
+                peer->fifo_tail = (peer->fifo_start + count - 1) & 0xff;
+                if (peer->fifo_critical && count >= peer->fifo_critical) {
+                    peer->ccev |= BIT(5); /* FIFO critical level */
+                }
             } else {
                 peer->ccev |= BIT(4); /* receive FIFO overrun */
             }
         }
         memcpy(&peer->msg_data[peer_off], frame, 64);
-        peer->ndat1 |= BIT(s->mbid & 31);
-        peer->mbsc1 |= BIT(s->mbid & 31);
+        if (s->mbctrl & MBCTRL_CHANNEL_B) {
+            peer->ndat1 |= BIT(s->mbid & 31);
+            peer->mbsc1 |= BIT(s->mbid & 31);
+        } else {
+            peer->ndat0 |= BIT(s->mbid & 31);
+            peer->mbsc0 |= BIT(s->mbid & 31);
+        }
         peer->last_rx_id = frame_id & 0x7ff;
         peer->last_rx_cycle = s->cycle & 0x3f;
         peer->last_rx_channel = (s->mbctrl & MBCTRL_CHANNEL_B) ? 1 : 0;
         peer->slot_status = s->slot_status;
         eray_update_irq(peer);
     }
-    s->mbsc1 |= BIT(s->mbid & 31);
+    if (s->mbctrl & MBCTRL_CHANNEL_B) {
+        s->mbsc1 |= BIT(s->mbid & 31);
+    } else {
+        s->mbsc0 |= BIT(s->mbid & 31);
+    }
+    s->host_busy = 0;
+    s->shadow_busy = 0;
     eray_update_irq(s);
 }
 
@@ -240,12 +264,14 @@ static uint64_t eray_read(void *opaque, hwaddr off, unsigned size)
     case ERAY_NEMC: return s->nemc;
     case ERAY_MBSC1: return s->mbsc1;
     case ERAY_NDAT1: return s->ndat1;
+    case ERAY_MBSC0: return s->mbsc0;
+    case ERAY_NDAT0: return s->ndat0;
     case ERAY_CMD: return s->command;
     case ERAY_CYCLE: return s->cycle;
     case ERAY_SLOTSTAT: return s->slot_status;
     case ERAY_MBID: return s->mbid;
     case ERAY_MBCTRL: return s->mbctrl;
-    case ERAY_MBPENDING: return s->mbsc1 | s->ndat1;
+    case ERAY_MBPENDING: return s->mbsc0 | s->mbsc1 | s->ndat0 | s->ndat1;
     case ERAY_SCHED_CFG: return s->sched_cfg | ((s->sched_period_ns / 1000) << 8);
     case ERAY_STATIC_SLOTS: return s->static_slots;
     case ERAY_DYNAMIC_START: return s->dynamic_start;
@@ -261,6 +287,12 @@ static uint64_t eray_read(void *opaque, hwaddr off, unsigned size)
     case ERAY_FCL: return s->fifo_depth;
     case ERAY_FILTER_ID: return s->slot_filter;
     case ERAY_FILTER_CYCLE: return s->cycle_filter;
+    case ERAY_MHDS: return s->host_busy | (s->shadow_busy << 1) |
+                            ((s->unlock_key & 0xff) << 8);
+    case ERAY_FSR_TAIL: return s->fifo_tail;
+    case ERAY_FSR_CRIT: return s->fifo_critical;
+    case ERAY_IRQ0_MASK: return s->irq0_mask;
+    case ERAY_IRQ1_MASK: return s->irq1_mask;
     default: return 0;
     }
 }
@@ -275,11 +307,21 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
     case ERAY_NEMC: s->nemc = value; break;
     case ERAY_MBSC1: s->mbsc1 &= ~value; break;
     case ERAY_NDAT1: s->ndat1 &= ~value; break;
+    case ERAY_MBSC0: s->mbsc0 &= ~value; break;
+    case ERAY_NDAT0: s->ndat0 &= ~value; break;
     case ERAY_CMD: eray_command(s, value); break;
     case ERAY_CYCLE: s->cycle = value & 0xff; break;
     case ERAY_SLOTSTAT: s->slot_status = value; break;
     case ERAY_MBID: s->mbid = value & 0xff; break;
-    case ERAY_MBCTRL: s->mbctrl = value; if (value & MBCTRL_COMMIT) eray_commit_message(s); break;
+    case ERAY_MBCTRL:
+        s->mbctrl = value;
+        if (value & MBCTRL_UNLOCK) {
+            s->unlock_key = 0xa5;
+        }
+        if (value & MBCTRL_COMMIT) {
+            eray_commit_message(s);
+        }
+        break;
     case ERAY_STATIC_SLOTS: s->static_slots = value & 0x7ff; break;
     case ERAY_DYNAMIC_START: s->dynamic_start = value & 0x7ff; break;
     case ERAY_MINISLOT: s->minislot = value & 0xff; break;
@@ -299,6 +341,11 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
     case ERAY_MRC: s->fifo_start = value & 0xff; break;
     case ERAY_FCL: s->fifo_depth = value & 0xff; break;
     case ERAY_FSR: s->fifo_status &= ~value; break; /* status W1C */
+    case ERAY_MHDS: s->host_busy = s->shadow_busy = 0; break;
+    case ERAY_FSR_TAIL: s->fifo_tail = value & 0xff; break;
+    case ERAY_FSR_CRIT: s->fifo_critical = value & 0xff; break;
+    case ERAY_IRQ0_MASK: s->irq0_mask = value & 0xffff; break;
+    case ERAY_IRQ1_MASK: s->irq1_mask = value; break;
     case ERAY_FILTER_ID: s->slot_filter = value & 0x7ff; break;
     case ERAY_FILTER_CYCLE: s->cycle_filter = value & 0x3f; break;
     default: break;
@@ -317,12 +364,16 @@ static void eray_reset(DeviceState *dev)
     TriCoreERAYState *s = TRICORE_ERAY(dev);
     s->ccsv = POC_CONFIG;
     s->ccev = s->succ1 = s->succ2 = s->succ3 = s->nemc = 0;
-    s->prtc1 = s->prtc2 = s->mbsc1 = s->ndat1 = 0;
+    s->prtc1 = s->prtc2 = 0;
+    s->mbsc0 = s->mbsc1 = s->ndat0 = s->ndat1 = 0;
     s->command = s->cycle = s->slot_status = 0;
     s->mbid = s->mbctrl = 0;
     s->static_slots = 64; s->dynamic_start = 65; s->minislot = 1;
     s->guardian = 0; s->channel_mask = 3;
     s->fifo_start = s->fifo_depth = s->fifo_status = 0;
+    s->fifo_tail = s->fifo_critical = 0;
+    s->host_busy = s->shadow_busy = s->unlock_key = 0;
+    s->irq0_mask = s->irq1_mask = 0;
     s->slot_filter = s->cycle_filter = 0;
     s->last_rx_id = s->last_rx_cycle = 0;
     s->last_rx_channel = 0;
@@ -378,7 +429,8 @@ static const VMStateDescription vmstate_eray = {
         VMSTATE_UINT32(succ1, TriCoreERAYState), VMSTATE_UINT32(succ2, TriCoreERAYState),
         VMSTATE_UINT32(succ3, TriCoreERAYState), VMSTATE_UINT32(nemc, TriCoreERAYState),
         VMSTATE_UINT32(prtc1, TriCoreERAYState), VMSTATE_UINT32(prtc2, TriCoreERAYState),
-        VMSTATE_UINT32(mbsc1, TriCoreERAYState), VMSTATE_UINT32(ndat1, TriCoreERAYState),
+        VMSTATE_UINT32(mbsc0, TriCoreERAYState), VMSTATE_UINT32(mbsc1, TriCoreERAYState),
+        VMSTATE_UINT32(ndat0, TriCoreERAYState), VMSTATE_UINT32(ndat1, TriCoreERAYState),
         VMSTATE_UINT32(command, TriCoreERAYState), VMSTATE_UINT32(cycle, TriCoreERAYState),
         VMSTATE_UINT32(slot_status, TriCoreERAYState), VMSTATE_UINT32(mbid, TriCoreERAYState),
         VMSTATE_UINT32(mbctrl, TriCoreERAYState), VMSTATE_TIMER_PTR(scheduler, TriCoreERAYState),
@@ -387,6 +439,10 @@ static const VMStateDescription vmstate_eray = {
         VMSTATE_UINT32(channel_mask, TriCoreERAYState),
         VMSTATE_UINT32(fifo_start, TriCoreERAYState), VMSTATE_UINT32(fifo_depth, TriCoreERAYState),
         VMSTATE_UINT32(fifo_status, TriCoreERAYState),
+        VMSTATE_UINT32(fifo_tail, TriCoreERAYState), VMSTATE_UINT32(fifo_critical, TriCoreERAYState),
+        VMSTATE_UINT32(host_busy, TriCoreERAYState), VMSTATE_UINT32(shadow_busy, TriCoreERAYState),
+        VMSTATE_UINT32(unlock_key, TriCoreERAYState),
+        VMSTATE_UINT32(irq0_mask, TriCoreERAYState), VMSTATE_UINT32(irq1_mask, TriCoreERAYState),
         VMSTATE_UINT32(slot_filter, TriCoreERAYState),
         VMSTATE_UINT32(cycle_filter, TriCoreERAYState),
         VMSTATE_UINT32(last_rx_id, TriCoreERAYState),
