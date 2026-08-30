@@ -236,6 +236,9 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
     dev = DEVICE(&s->ici);
     if (!sysbus_realize(SYS_BUS_DEVICE(dev), errp)) return;
     sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, 0xF000B000);
+    /* Route each ICI output into the TC4x IR source bank.  Keeping this
+     * connection in the SoC (rather than the test board) makes firmware-visible
+     * inter-core requests follow the same ISP path as peripheral interrupts. */
     for (unsigned i = 0; i < 6; i++)
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->ici), i,
             qdev_get_gpio_in_named(DEVICE(&s->ir), "irq", 720 + i));

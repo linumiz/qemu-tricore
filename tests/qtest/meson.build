@@ -32,7 +32,8 @@ qtests_generic = [
   'netdev-socket',
 ]
 
-qtests_tricore = [ 'tricore-can-transport', 'tricore-can-transport-api' ]
+qtests_tricore = [ 'tricore-can-transport', 'tricore-can-transport-api',
+  'tricore-ici-multicore' ]
 if enable_modules
   qtests_generic += [ 'modules-test' ]
 endif
