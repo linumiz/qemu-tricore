@@ -116,7 +116,7 @@ typedef struct TC39XBSoCState {
     TriCoreSFRState *sfr;
     TriCoreASCLINState *asclin;
     TriCoreASCLINState *asclin_extra[11];
-    TriCoreMCANState *mcan;
+    TriCoreMCANState *mcan[3];
     CanBusState *canbus;
 
     qemu_irq irq[256];

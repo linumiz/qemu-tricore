@@ -317,7 +317,9 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     s->scu = TRICORE_SCU(object_new(TYPE_TRICORE_SCU));
     s->stm = TRICORE_STM(object_new(TYPE_TRICORE_STM));
     s->sfr = TRICORE_SFR(object_new(TYPE_TRICORE_SFR));
-    s->mcan = TRICORE_MCAN(object_new(TYPE_TRICORE_MCAN));
+    for (unsigned i = 0; i < 3; i++) {
+        s->mcan[i] = TRICORE_MCAN(object_new(TYPE_TRICORE_MCAN));
+    }
 
     /* Parent all devices so sysbus_realize_and_unref does not free them */
     object_property_add_child(OBJECT(dev_soc), "irbus", OBJECT(s->irbus));
@@ -332,7 +334,12 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     object_property_add_child(OBJECT(dev_soc), "scu", OBJECT(s->scu));
     object_property_add_child(OBJECT(dev_soc), "stm", OBJECT(s->stm));
     object_property_add_child(OBJECT(dev_soc), "sfr", OBJECT(s->sfr));
-    object_property_add_child(OBJECT(dev_soc), "mcan", OBJECT(s->mcan));
+    for (unsigned i = 0; i < 3; i++) {
+        char *name = g_strdup_printf("mcan%u", i);
+        object_property_add_child(OBJECT(dev_soc), name,
+                                  OBJECT(s->mcan[i]));
+        g_free(name);
+    }
 
     /* IR properties */
     qdev_prop_set_bit(DEVICE(s->irbus), "tc4x-mode", false);
@@ -373,8 +380,10 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     object_property_add_const_link(OBJECT(s->scu), "cpu", OBJECT(&s->cpus[0]));
     qdev_prop_set_chr(DEVICE(s->asclin), "chardev", serial_hd(0));
     if (s->canbus) {
-        object_property_set_link(OBJECT(s->mcan), "canbus",
-                                 OBJECT(s->canbus), &error_abort);
+        for (unsigned i = 0; i < 3; i++) {
+            object_property_set_link(OBJECT(s->mcan[i]), "canbus",
+                                     OBJECT(s->canbus), &error_abort);
+        }
     }
 
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->sfr), &error_fatal);
@@ -383,7 +392,9 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->irbus), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->virt), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(s->asclin), &error_fatal);
-    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->mcan), &error_fatal);
+    for (unsigned i = 0; i < 3; i++) {
+        sysbus_realize_and_unref(SYS_BUS_DEVICE(s->mcan[i]), &error_fatal);
+    }
     for (unsigned i = 0; i < 11; i++) {
         DeviceState *extra = DEVICE(s->asclin_extra[i]);
         qdev_prop_set_chr(extra, "chardev", serial_hd(i + 1));
@@ -446,7 +457,13 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     memory_region_add_subregion(sysmem, sc->memmap[TC39XB_ASCLIN].base,
                                 &s->asclin->iomem);
     /* TC3xx MCMCAN0 control window (iLLD/User Manual base). */
-    memory_region_add_subregion(sysmem, 0xF0200000, &s->mcan->iomem);
+    static const hwaddr mcan_base[3] = {
+        0xF0200000, 0xF0210000, 0xF0220000,
+    };
+    for (unsigned i = 0; i < 3; i++) {
+        memory_region_add_subregion(sysmem, mcan_base[i],
+                                    &s->mcan[i]->iomem);
+    }
     for (unsigned i = 0; i < 11; i++) {
         memory_region_add_subregion(sysmem,
             sc->memmap[TC39XB_ASCLIN].base + 0x200 * (i + 1),

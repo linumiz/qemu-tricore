@@ -14,6 +14,7 @@ static void test_tc397_can_machine(void)
                 "-machine KIT_AURIX_TC397B_TRB,canbus=canbus");
     /* TC3xx MCMCAN0 control space is present at the documented base. */
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF0200000), ==, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF0220000), ==, 0);
     qtest_quit(global_qtest);
 }
 
