@@ -37,6 +37,7 @@ REG32(MO0_CTR, 0x91c)
 REG32(MO0_AMR, 0x90c)
 #define MO_STRIDE 0x20
 #define MO_REG(n, off) ((off) + (n) * MO_STRIDE)
+#define MCAN_OBJECTS 256
 
 static void tricore_mcan_update_irq(TriCoreMCANState *s)
 {
@@ -61,12 +62,12 @@ static ssize_t tricore_mcan_receive(CanBusClientState *client,
         return 0;
     }
     unsigned object = 0;
-    while (object < 4 && ((frames[0].can_id ^
+    while (object < MCAN_OBJECTS && ((frames[0].can_id ^
              s->regs[MO_REG(object, R_MO0_AR) / 4]) &
             ~s->regs[MO_REG(object, R_MO0_AMR) / 4]) != 0) {
         object++;
     }
-    if (object == 4) {
+    if (object == MCAN_OBJECTS) {
         return 0;
     }
     s->rx_frame = frames[0];
@@ -135,18 +136,18 @@ static void tricore_mcan_write(void *opaque, hwaddr addr, uint64_t value,
         s->regs[index] &= ~(uint32_t)value;
     } else if (addr == R_INT_ENABLE || addr == R_CONTROL ||
                addr == R_TXID || addr == R_TXDATAL || addr == R_TXDATAH ||
-               (addr >= R_MO0_AR && addr < R_MO0_AR + 4 * MO_STRIDE &&
+               (addr >= R_MO0_AR && addr < R_MO0_AR + MCAN_OBJECTS * MO_STRIDE &&
                 ((addr - R_MO0_AR) % MO_STRIDE) == 0) ||
-               (addr >= R_MO0_AMR && addr < R_MO0_AMR + 4 * MO_STRIDE &&
+               (addr >= R_MO0_AMR && addr < R_MO0_AMR + MCAN_OBJECTS * MO_STRIDE &&
                 ((addr - R_MO0_AMR) % MO_STRIDE) == 0) ||
-               (addr >= R_MO0_DATAL && addr < R_MO0_DATAL + 4 * MO_STRIDE &&
+               (addr >= R_MO0_DATAL && addr < R_MO0_DATAL + MCAN_OBJECTS * MO_STRIDE &&
                 ((addr - R_MO0_DATAL) % MO_STRIDE) == 0) ||
-               (addr >= R_MO0_DATAH && addr < R_MO0_DATAH + 4 * MO_STRIDE &&
+               (addr >= R_MO0_DATAH && addr < R_MO0_DATAH + MCAN_OBJECTS * MO_STRIDE &&
                 ((addr - R_MO0_DATAH) % MO_STRIDE) == 0)) {
         s->regs[index] = value;
     } else if (addr == R_TXCTRL && (value & 1)) {
         tricore_mcan_send(s);
-    } else if (addr >= R_MO0_CTR && addr < R_MO0_CTR + 4 * MO_STRIDE &&
+    } else if (addr >= R_MO0_CTR && addr < R_MO0_CTR + MCAN_OBJECTS * MO_STRIDE &&
                ((addr - R_MO0_CTR) % MO_STRIDE) == 0 && (value & 1)) {
         unsigned object = (addr - R_MO0_CTR) / MO_STRIDE;
         s->regs[R_TXID / 4] = s->regs[MO_REG(object, R_MO0_AR) / 4];
@@ -198,7 +199,7 @@ static void tricore_mcan_init(Object *obj)
     TriCoreMCANState *s = TRICORE_MCAN(obj);
     sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq);
     memory_region_init_io(&s->iomem, obj, &tricore_mcan_ops, s,
-                          TYPE_TRICORE_MCAN, 0x2000);
+                          TYPE_TRICORE_MCAN, 0x3000);
     /* Reset value accepts every identifier until firmware programs a mask. */
     for (unsigned i = 0; i < 4; i++) {
         s->regs[MO_REG(i, R_MO0_AMR) / 4] = UINT32_MAX;
@@ -211,7 +212,7 @@ static const VMStateDescription vmstate_tricore_mcan = {
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT32_ARRAY(regs, TriCoreMCANState, 0x2000 / 4),
+        VMSTATE_UINT32_ARRAY(regs, TriCoreMCANState, 0x3000 / 4),
         VMSTATE_UINT32(rx_frame.can_id, TriCoreMCANState),
         VMSTATE_UINT8(rx_frame.can_dlc, TriCoreMCANState),
         VMSTATE_UINT8(rx_frame.flags, TriCoreMCANState),
