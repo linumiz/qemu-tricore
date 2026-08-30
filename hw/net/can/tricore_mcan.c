@@ -49,6 +49,23 @@ static void tricore_mcan_update_irq(TriCoreMCANState *s)
     }
 }
 
+static void tricore_mcan_load_rx(TriCoreMCANState *s)
+{
+    if (!s->rx_fifo_count) {
+        s->rx_pending = false;
+        s->regs[R_STATUS / 4] &= ~R_STATUS_RX_PENDING_MASK;
+        return;
+    }
+    s->rx_frame = s->rx_fifo[s->rx_fifo_head];
+    s->rx_fifo_head = (s->rx_fifo_head + 1) % ARRAY_SIZE(s->rx_fifo);
+    s->rx_fifo_count--;
+    s->rx_pending = true;
+    s->regs[R_RXID / 4] = s->rx_frame.can_id;
+    s->regs[R_RXDATAL / 4] = ldl_le_p(&s->rx_frame.data[0]);
+    s->regs[R_RXDATAH / 4] = ldl_le_p(&s->rx_frame.data[4]);
+    s->regs[R_STATUS / 4] |= R_STATUS_RX_PENDING_MASK;
+}
+
 static bool tricore_mcan_can_receive(CanBusClientState *client)
 {
     TriCoreMCANState *s = container_of(client, TriCoreMCANState, bus_client);
@@ -62,7 +79,7 @@ static ssize_t tricore_mcan_receive(CanBusClientState *client,
 {
     TriCoreMCANState *s = container_of(client, TriCoreMCANState, bus_client);
 
-    if (!frames_cnt || s->rx_pending) {
+    if (!frames_cnt || s->rx_fifo_count == ARRAY_SIZE(s->rx_fifo)) {
         return 0;
     }
     unsigned object = 0;
@@ -74,8 +91,12 @@ static ssize_t tricore_mcan_receive(CanBusClientState *client,
     if (object == MCAN_OBJECTS) {
         return 0;
     }
-    s->rx_frame = frames[0];
-    s->rx_pending = true;
+    s->rx_fifo[s->rx_fifo_tail] = frames[0];
+    s->rx_fifo_tail = (s->rx_fifo_tail + 1) % ARRAY_SIZE(s->rx_fifo);
+    s->rx_fifo_count++;
+    if (!s->rx_pending) {
+        tricore_mcan_load_rx(s);
+    }
     s->regs[R_RXID / 4] = s->rx_frame.can_id;
     s->regs[R_RXDATAL / 4] = ldl_le_p(&s->rx_frame.data[0]);
     s->regs[R_RXDATAH / 4] = ldl_le_p(&s->rx_frame.data[4]);
@@ -120,8 +141,7 @@ static uint64_t tricore_mcan_read(void *opaque, hwaddr addr, unsigned size)
     }
     if (addr == R_RXDATAH) {
         uint32_t value = s->regs[index];
-        s->rx_pending = false;
-        s->regs[R_STATUS / 4] &= ~R_STATUS_RX_PENDING_MASK;
+        tricore_mcan_load_rx(s);
         tricore_mcan_update_irq(s);
         return value;
     }
@@ -218,13 +238,21 @@ static const VMStateDescription vmstate_tricore_mcan = {
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT32_ARRAY(regs, TriCoreMCANState, 0x3000 / 4),
+        VMSTATE_BUFFER_UNSAFE_INFO(regs, TriCoreMCANState, 1,
+                                   vmstate_info_buffer,
+                                   sizeof(((TriCoreMCANState *)0)->regs)),
         VMSTATE_UINT32(rx_frame.can_id, TriCoreMCANState),
         VMSTATE_UINT8(rx_frame.can_dlc, TriCoreMCANState),
         VMSTATE_UINT8(rx_frame.flags, TriCoreMCANState),
         VMSTATE_UINT8_ARRAY(rx_frame.data, TriCoreMCANState, 64),
         VMSTATE_BOOL(rx_pending, TriCoreMCANState),
         VMSTATE_UINT8(enabled_nodes, TriCoreMCANState),
+        VMSTATE_BUFFER_UNSAFE_INFO(rx_fifo, TriCoreMCANState, 1,
+                                   vmstate_info_buffer,
+                                   sizeof(((TriCoreMCANState *)0)->rx_fifo)),
+        VMSTATE_UINT8(rx_fifo_head, TriCoreMCANState),
+        VMSTATE_UINT8(rx_fifo_tail, TriCoreMCANState),
+        VMSTATE_UINT8(rx_fifo_count, TriCoreMCANState),
         VMSTATE_END_OF_LIST()
     },
 };
