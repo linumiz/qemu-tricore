@@ -33,6 +33,8 @@ static void test_eray_profiles(void)
 {
     qtest_start("-machine KIT_AURIX_TC277_TRB");
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C100), ==, 1);
+    qtest_writel(global_qtest, 0xF001C108, 0xffffffff);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C108), ==, 0x03ffffff);
     qtest_writel(global_qtest, 0xF001C118, 5); /* HALT is invalid in CONFIG */
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C104) & 1, ==, 1);
     /* ERAY0 INT0 is routed to the documented TC27x SRC slot 160. */
@@ -62,6 +64,8 @@ static void test_eray_profiles(void)
     qtest_writel(global_qtest, 0xF0017184, 20);
     qtest_writel(global_qtest, 0xF0017188, 32);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF0017188), ==, 32);
+    qtest_writel(global_qtest, 0xF001C128, 0x08);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C128), ==, 0);
     qtest_writel(global_qtest, 0xF001C118, 3);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF001C100), ==, 0x0d);
     qtest_quit(global_qtest);

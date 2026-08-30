@@ -81,6 +81,13 @@
 #define ERAY_SUCC2_MASK 0x03ffffffu
 #define ERAY_SUCC3_MASK 0x03ffffffu
 #define ERAY_PRTC_MASK  0x0fffffffu
+#define ERAY_CCEV_MASK  0x000000ffu
+#define ERAY_CMD_MASK   0x000000ffu
+#define ERAY_CYCLE_MASK 0x0000003fu
+#define ERAY_SLOTSTAT_MASK 0xc07fffffu
+#define ERAY_MBCTRL_MASK (MBCTRL_COMMIT | MBCTRL_UNLOCK | \
+                          MBCTRL_CHANNEL_B | MBCTRL_FIFO_POP)
+#define ERAY_GTU_MASK   0x0000ffffu
 
 #define CCSV_POC_SHIFT 0
 #define CCSV_POC_MASK  0x3f
@@ -445,19 +452,20 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
 {
     TriCoreERAYState *s = opaque;
     switch (off) {
-    case ERAY_CCEV: s->ccev &= ~value; break; /* documented W1C status */
+    case ERAY_CCEV: s->ccev &= ~(value & ERAY_CCEV_MASK); break;
     case ERAY_SUCC1: s->succ1 = value & ERAY_SUCC1_MASK; break;
     case ERAY_NEMC: s->nemc = value & 0x00ffffffu; break;
     case ERAY_MBSC1: s->mbsc1 &= ~value; break;
     case ERAY_NDAT1: s->ndat1 &= ~value; break;
     case ERAY_MBSC0: s->mbsc0 &= ~value; break;
     case ERAY_NDAT0: s->ndat0 &= ~value; break;
-    case ERAY_CMD: eray_command(s, value); break;
-    case ERAY_CYCLE: s->cycle = value % MAX(1u, s->cycle_length); break;
-    case ERAY_SLOTSTAT: s->slot_status = value; break;
+    case ERAY_CMD: eray_command(s, value & ERAY_CMD_MASK); break;
+    case ERAY_CYCLE: s->cycle = (value & ERAY_CYCLE_MASK) %
+                                  MAX(1u, s->cycle_length); break;
+    case ERAY_SLOTSTAT: s->slot_status = value & ERAY_SLOTSTAT_MASK; break;
     case ERAY_MBID: s->mbid = value & 0xff; break;
     case ERAY_MBCTRL:
-        s->mbctrl = value;
+        s->mbctrl = value & ERAY_MBCTRL_MASK;
         if (value & MBCTRL_UNLOCK) {
             s->unlock_key = 0xa5;
             s->unlock_key_ch[(value & MBCTRL_CHANNEL_B) != 0] = 0xa5;
@@ -505,12 +513,12 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
     case ERAY_IRQ0_MASK: s->irq0_mask = value & 0xffff; break;
     case ERAY_IRQ1_MASK: s->irq1_mask = value; break;
     case ERAY_GTU_MICROTICKS:
-        s->gtu_microticks = value & 0xffff;
+        s->gtu_microticks = value & ERAY_GTU_MASK;
         s->sched_period_ns = MAX(1u, s->gtu_microticks) *
                              MAX(1u, s->gtu_macroticks) * 1000;
         break;
     case ERAY_GTU_MACROTICKS:
-        s->gtu_macroticks = value & 0xffff;
+        s->gtu_macroticks = value & ERAY_GTU_MASK;
         s->sched_period_ns = MAX(1u, s->gtu_microticks) *
                              MAX(1u, s->gtu_macroticks) * 1000;
         break;
