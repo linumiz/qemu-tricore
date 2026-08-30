@@ -463,6 +463,13 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     for (unsigned i = 0; i < 3; i++) {
         memory_region_add_subregion(sysmem, mcan_base[i],
                                     &s->mcan[i]->iomem);
+        /* MCMCAN0..2 expose 16 service requests each.  Keep the controller
+         * channels independent while routing them through the shared IR. */
+        for (unsigned irq = 0; irq < 16; irq++) {
+            sysbus_connect_irq(SYS_BUS_DEVICE(s->mcan[i]), irq,
+                qdev_get_gpio_in_named(DEVICE(s->irbus), "irq",
+                                       176 + i * 16 + irq));
+        }
     }
     for (unsigned i = 0; i < 11; i++) {
         memory_region_add_subregion(sysmem,
