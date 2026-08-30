@@ -18,7 +18,8 @@ struct TriCoreDMAState {
     MemoryRegion iomem;
     qemu_irq irq;
     uint32_t src, dst, length, control, status, descriptor, request;
-    uint32_t accen, error_enable, priority;
+    uint32_t accen, error_enable, priority, last_request, bytes_done;
+    bool active, pending_request;
 };
 
 #endif

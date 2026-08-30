@@ -3,6 +3,7 @@
 #include "system/address-spaces.h"
 #include "system/memory.h"
 #include "hw/core/irq.h"
+#include "migration/vmstate.h"
 
 /* Public AURIX DMA channel model: a programmed move-engine request is
  * completed deterministically and raises the channel completion interrupt. */
@@ -69,6 +70,9 @@ static void dma_write(void *opaque, hwaddr off, uint64_t value, unsigned size)
             break;
         }
         if (value & DMA_CTL_START) {
+            s->active = true;
+            s->pending_request = false;
+            s->bytes_done = 0;
             MemTxResult r = MEMTX_OK;
             unsigned count = 0;
             do {
@@ -91,6 +95,7 @@ static void dma_write(void *opaque, hwaddr off, uint64_t value, unsigned size)
                                                            MEMTXATTRS_UNSPECIFIED, buf, len);
                 g_free(buf);
                 if (r != MEMTX_OK) break;
+                s->bytes_done += len;
                 if (!(value & DMA_CTL_CHAIN) || !next) {
                     s->status = DMA_STAT_DONE | ((value & DMA_CTL_CHAIN) ? DMA_STAT_EOL : 0);
                     break;
@@ -99,6 +104,7 @@ static void dma_write(void *opaque, hwaddr off, uint64_t value, unsigned size)
             } while (++count < 256);
             if (count == 256) s->status = DMA_STAT_DESC_ERROR;
             if (r != MEMTX_OK && !(s->status & DMA_STAT_DESC_ERROR)) s->status = DMA_STAT_ERROR;
+            s->active = false;
             if ((value & DMA_CTL_IRQ) && r == MEMTX_OK) {
                 qemu_set_irq(s->irq, 1);
                 qemu_set_irq(s->irq, 0);
@@ -112,10 +118,28 @@ static void dma_write(void *opaque, hwaddr off, uint64_t value, unsigned size)
 void tricore_dma_request(TriCoreDMAState *s, uint32_t request)
 {
     /* SoC-specific peripheral lines converge on this stable request API. */
+    s->last_request = request;
+    s->pending_request = true;
     if ((s->control & DMA_CTL_REQ_ENABLE) && s->request == request) {
         dma_write(s, DMA_CTL, s->control | DMA_CTL_START, 4);
     }
 }
+
+static const VMStateDescription vmstate_tricore_dma = {
+    .name = TYPE_TRICORE_DMA,
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT32(src, TriCoreDMAState), VMSTATE_UINT32(dst, TriCoreDMAState),
+        VMSTATE_UINT32(length, TriCoreDMAState), VMSTATE_UINT32(control, TriCoreDMAState),
+        VMSTATE_UINT32(status, TriCoreDMAState), VMSTATE_UINT32(descriptor, TriCoreDMAState),
+        VMSTATE_UINT32(request, TriCoreDMAState), VMSTATE_UINT32(accen, TriCoreDMAState),
+        VMSTATE_UINT32(error_enable, TriCoreDMAState), VMSTATE_UINT32(priority, TriCoreDMAState),
+        VMSTATE_UINT32(last_request, TriCoreDMAState), VMSTATE_UINT32(bytes_done, TriCoreDMAState),
+        VMSTATE_BOOL(active, TriCoreDMAState), VMSTATE_BOOL(pending_request, TriCoreDMAState),
+        VMSTATE_END_OF_LIST()
+    }
+};
 
 static const MemoryRegionOps dma_ops = { .read = dma_read, .write = dma_write,
     .endianness = DEVICE_LITTLE_ENDIAN, .valid.min_access_size = 4,
@@ -134,6 +158,8 @@ static void dma_reset(DeviceState *dev)
     TriCoreDMAState *s = TRICORE_DMA(dev);
     s->src = s->dst = s->length = s->control = s->status = 0;
     s->descriptor = s->request = 0;
+    s->last_request = s->bytes_done = 0;
+    s->active = s->pending_request = false;
     s->accen = 0xffffffffu;
     s->error_enable = DMA_STAT_ACCESS_ERROR | DMA_STAT_BUS_ERROR;
     s->priority = 0;
@@ -142,6 +168,7 @@ static void dma_reset(DeviceState *dev)
 static void dma_class_init(ObjectClass *klass, const void *data)
 {
     device_class_set_legacy_reset(DEVICE_CLASS(klass), dma_reset);
+    DEVICE_CLASS(klass)->vmsd = &vmstate_tricore_dma;
 }
 
 static const TypeInfo dma_type = { .name = TYPE_TRICORE_DMA,
