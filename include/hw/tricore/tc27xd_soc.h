@@ -108,6 +108,11 @@ typedef struct TC27XDSoCClass {
     const char *cpu_type;
     const MemmapEntry *memmap;
     uint32_t num_cpus;
+    uint32_t ir_num_isps;
+    uint32_t dspr_size[3];
+    uint32_t pspr_size[3];
+    uint32_t pflash0_size;
+    uint32_t pflash1_size;
 } TC27XDSoCClass;
 
 #define TC27XD_MEMDEV_CPU(n) \

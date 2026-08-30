@@ -68,7 +68,7 @@ static void tc27x_pmcsr_write(void *opaque, hwaddr offset,
 {
     TC27XDSoCState *s = opaque;
     unsigned id = offset >> 2;
-    if (id < 3 && !(value & 3) && id > 0) {
+    if (id < 3 && id < TC27XD_SOC_GET_CLASS(s)->num_cpus && !(value & 3) && id > 0) {
         CPUState *cs = CPU(&s->cpus[id]);
         cs->halted = 0;
         cpu_resume(cs);
@@ -77,9 +77,9 @@ static void tc27x_pmcsr_write(void *opaque, hwaddr offset,
 
 static uint64_t tc27x_pmcsr_read(void *opaque, hwaddr offset, unsigned size)
 {
-    (void)opaque;
     unsigned id = offset >> 2;
-    return (id < 3 && id > 0) ? 1 : 0;
+    TC27XDSoCState *s = opaque;
+    return (id < 3 && id < TC27XD_SOC_GET_CLASS(s)->num_cpus && id > 0) ? 1 : 0;
 }
 
 static const MemoryRegionOps tc27x_pmcsr_ops = {
@@ -180,18 +180,22 @@ static void tc27xd_soc_init_memory_mapping(DeviceState *dev_soc)
     TC27XDSoCCPUMemState *c2 = &s->cpu2mem;
     TC27XDSoCFlashMemState *f = &s->flashmem;
 
-    make_ram(&c0->dspr, "CPU0.DSPR", map[TC27XD_DSPR0].base, map[TC27XD_DSPR0].size);
-    make_ram(&c0->pspr, "CPU0.PSPR", map[TC27XD_PSPR0].base, map[TC27XD_PSPR0].size);
-    make_ram(&c1->dspr, "CPU1.DSPR", map[TC27XD_DSPR1].base, map[TC27XD_DSPR1].size);
-    make_ram(&c1->pspr, "CPU1.PSPR", map[TC27XD_PSPR1].base, map[TC27XD_PSPR1].size);
-    make_ram(&c2->dspr, "CPU2.DSPR", map[TC27XD_DSPR2].base, map[TC27XD_DSPR2].size);
-    make_ram(&c2->pspr, "CPU2.PSPR", map[TC27XD_PSPR2].base, map[TC27XD_PSPR2].size);
+    make_ram(&c0->dspr, "CPU0.DSPR", map[TC27XD_DSPR0].base, sc->dspr_size[0]);
+    make_ram(&c0->pspr, "CPU0.PSPR", map[TC27XD_PSPR0].base, sc->pspr_size[0]);
+    make_ram(&c1->dspr, "CPU1.DSPR", map[TC27XD_DSPR1].base, sc->dspr_size[1]);
+    make_ram(&c1->pspr, "CPU1.PSPR", map[TC27XD_PSPR1].base, sc->pspr_size[1]);
+    if (sc->num_cpus > 2) {
+        make_ram(&c2->dspr, "CPU2.DSPR", map[TC27XD_DSPR2].base, sc->dspr_size[2]);
+        make_ram(&c2->pspr, "CPU2.PSPR", map[TC27XD_PSPR2].base, sc->pspr_size[2]);
+    }
 
     /* TODO: Control Cache mapping with Memory Test Unit (MTU) */
-    make_ram(&c2->dcache, "CPU2.DCACHE", map[TC27XD_DCACHE2].base, map[TC27XD_DCACHE2].size);
-    make_ram(&c2->dtag,   "CPU2.DTAG", map[TC27XD_DTAG2].base, map[TC27XD_DTAG2].size);
-    make_ram(&c2->pcache, "CPU2.PCACHE", map[TC27XD_PCACHE2].base, map[TC27XD_PCACHE2].size);
-    make_ram(&c2->ptag,   "CPU2.PTAG", map[TC27XD_PTAG2].base, map[TC27XD_PTAG2].size);
+    if (sc->num_cpus > 2) {
+        make_ram(&c2->dcache, "CPU2.DCACHE", map[TC27XD_DCACHE2].base, map[TC27XD_DCACHE2].size);
+        make_ram(&c2->dtag,   "CPU2.DTAG", map[TC27XD_DTAG2].base, map[TC27XD_DTAG2].size);
+        make_ram(&c2->pcache, "CPU2.PCACHE", map[TC27XD_PCACHE2].base, map[TC27XD_PCACHE2].size);
+        make_ram(&c2->ptag,   "CPU2.PTAG", map[TC27XD_PTAG2].base, map[TC27XD_PTAG2].size);
+    }
     make_ram(&c1->dcache, "CPU1.DCACHE", map[TC27XD_DCACHE1].base, map[TC27XD_DCACHE1].size);
     make_ram(&c1->dtag,   "CPU1.DTAG", map[TC27XD_DTAG1].base, map[TC27XD_DTAG1].size);
     make_ram(&c1->pcache, "CPU1.PCACHE", map[TC27XD_PCACHE1].base, map[TC27XD_PCACHE1].size);
@@ -206,8 +210,10 @@ static void tc27xd_soc_init_memory_mapping(DeviceState *dev_soc)
     make_alias(&s->psprX, "LOCAL.PSPR", &c0->pspr, map[TC27XD_PSPRX].base);
     make_alias(&s->dsprX, "LOCAL.DSPR", &c0->dspr, map[TC27XD_DSPRX].base);
 
-    make_ram(&f->pflash0_c, "PF0", map[TC27XD_PFLASH0_C].base, map[TC27XD_PFLASH0_C].size);
-    make_ram(&f->pflash1_c, "PF1", map[TC27XD_PFLASH1_C].base, map[TC27XD_PFLASH1_C].size);
+    make_ram(&f->pflash0_c, "PF0", map[TC27XD_PFLASH0_C].base, sc->pflash0_size);
+    if (sc->pflash1_size) {
+        make_ram(&f->pflash1_c, "PF1", map[TC27XD_PFLASH1_C].base, sc->pflash1_size);
+    }
     make_ram(&f->dflash0,   "DF0", map[TC27XD_DFLASH0].base, map[TC27XD_DFLASH0].size);
     make_ram(&f->dflash1,   "DF1", map[TC27XD_DFLASH1].base, map[TC27XD_DFLASH1].size);
     make_ram(&f->olda_c,    "OLDA", map[TC27XD_OLDA_C].base, map[TC27XD_OLDA_C].size);
@@ -216,7 +222,9 @@ static void tc27xd_soc_init_memory_mapping(DeviceState *dev_soc)
     make_ram(&f->emem_c,    "EMEM", map[TC27XD_EMEM_C].base, map[TC27XD_EMEM_C].size);
 
     make_alias(&f->pflash0_u, "PF0.U",    &f->pflash0_c, map[TC27XD_PFLASH0_U].base);
-    make_alias(&f->pflash1_u, "PF1.U",    &f->pflash1_c, map[TC27XD_PFLASH1_U].base);
+    if (sc->pflash1_size) {
+        make_alias(&f->pflash1_u, "PF1.U",    &f->pflash1_c, map[TC27XD_PFLASH1_U].base);
+    }
     make_alias(&f->olda_u,    "OLDA.U",   &f->olda_c, map[TC27XD_OLDA_U].base);
     make_alias(&f->brom_u,    "BROM.U",   &f->brom_c, map[TC27XD_BROM_U].base);
     make_alias(&f->lmuram_u,  "LMURAM.U", &f->lmuram_c, map[TC27XD_LMURAM_U].base);
@@ -254,10 +262,10 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     object_property_add_child(OBJECT(dev_soc), "sfr", OBJECT(s->sfr));
 
     qdev_prop_set_bit(DEVICE(s->irbus), "tc4x-mode", false);
-    qdev_prop_set_uint8(DEVICE(s->irbus), "num-isps", 3);
+    qdev_prop_set_uint8(DEVICE(s->irbus), "num-isps", sc->ir_num_isps);
     qdev_prop_set_uint16(DEVICE(s->irbus), "num-irqs", 512);
 
-    for (unsigned i = 0; i < 3; i++) {
+    for (unsigned i = 0; i < sc->num_cpus; i++) {
         object_property_set_bool(OBJECT(&s->cpus[i]), "start-powered-off",
                                  i != 0, &error_abort);
         CPU(&s->cpus[i])->cpu_index = i;
@@ -291,13 +299,13 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(s->irbus), 0, 0xF0037000);
     sysbus_mmio_map(SYS_BUS_DEVICE(s->irbus), 1, 0xF0038000);
 
-    for (unsigned i = 0; i < 3; i++) {
+    for (unsigned i = 0; i < sc->num_cpus; i++) {
         qdev_connect_gpio_out_named(DEVICE(s->irbus), "isp", i,
             qdev_get_gpio_in_named(DEVICE(&s->cpus[i]), "tricore.irq", 0));
     }
 
     /* TC27D CPU register windows: F881/F883/F8850000. */
-    for (unsigned i = 0; i < 3; i++) {
+    for (unsigned i = 0; i < sc->num_cpus; i++) {
         struct TC27XCPUControl *c = &s->cpu_ctrl[i];
         c->soc = s; c->id = i; c->dbgsr = i ? 1 : 0;
         char *name = g_strdup_printf("tc27x-cpu%u-control", i);
@@ -338,8 +346,10 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
 static void tc27xd_soc_reset(DeviceState *dev_soc)
 {
     TC27XDSoCState *s = TC27XD_SOC(dev_soc);
-    
-    for (unsigned i = 0; i < 3; i++) cpu_state_reset(&s->cpus[i].env);
+    TC27XDSoCClass *sc = TC27XD_SOC_GET_CLASS(s);
+    for (unsigned i = 0; i < sc->num_cpus; i++) {
+        cpu_state_reset(&s->cpus[i].env);
+    }
 }
 
 static void tc27xd_soc_init(Object *obj)
@@ -347,7 +357,7 @@ static void tc27xd_soc_init(Object *obj)
     TC27XDSoCState *s = TC27XD_SOC(obj);
     TC27XDSoCClass *sc = TC27XD_SOC_GET_CLASS(s);
 
-    for (unsigned i = 0; i < 3; i++) {
+    for (unsigned i = 0; i < sc->num_cpus; i++) {
         char *name = g_strdup_printf("tc27x-cpu%u", i);
         object_initialize_child(obj, name, &s->cpus[i], sc->cpu_type);
         g_free(name);
@@ -370,6 +380,42 @@ static void tc277d_soc_class_init(ObjectClass *oc, const void *data)
     sc->cpu_type     = TRICORE_CPU_TYPE_NAME("tc2x");
     sc->memmap       = tc27xd_soc_memmap;
     sc->num_cpus     = 3;
+    sc->ir_num_isps  = 3;
+    sc->dspr_size[0] = 112 * KiB;
+    sc->dspr_size[1] = 120 * KiB;
+    sc->dspr_size[2] = 120 * KiB;
+    sc->pspr_size[0] = 24 * KiB;
+    sc->pspr_size[1] = 32 * KiB;
+    sc->pspr_size[2] = 32 * KiB;
+    sc->pflash0_size = 2 * MiB;
+    sc->pflash1_size = 2 * MiB;
+}
+
+static void tc26b_soc_class_init(ObjectClass *oc, const void *data)
+{
+    TC27XDSoCClass *sc = TC27XD_SOC_CLASS(oc);
+    tc277d_soc_class_init(oc, data);
+    sc->name = "tc26b-soc";
+    sc->num_cpus = 2;
+    sc->ir_num_isps = 2;
+    sc->dspr_size[0] = 72 * KiB;
+    sc->dspr_size[1] = 120 * KiB;
+    sc->pspr_size[0] = 16 * KiB;
+    sc->pspr_size[1] = 32 * KiB;
+    sc->dspr_size[2] = sc->pspr_size[2] = 0;
+    sc->pflash0_size = 1536 * KiB;
+    sc->pflash1_size = 0;
+}
+
+static void tc29b_soc_class_init(ObjectClass *oc, const void *data)
+{
+    TC27XDSoCClass *sc = TC27XD_SOC_CLASS(oc);
+    tc277d_soc_class_init(oc, data);
+    sc->name = "tc29b-soc";
+    sc->dspr_size[0] = 120 * KiB;
+    sc->dspr_size[1] = 240 * KiB;
+    sc->dspr_size[2] = 240 * KiB;
+    sc->pspr_size[0] = sc->pspr_size[1] = sc->pspr_size[2] = 32 * KiB;
 }
 
 static const TypeInfo tc27xd_soc_types[] = {
@@ -377,6 +423,14 @@ static const TypeInfo tc27xd_soc_types[] = {
         .name          = "tc277d-soc",
         .parent        = TYPE_TC27XD_SOC,
         .class_init    = tc277d_soc_class_init,
+    }, {
+        .name          = "tc26b-soc",
+        .parent        = TYPE_TC27XD_SOC,
+        .class_init    = tc26b_soc_class_init,
+    }, {
+        .name          = "tc29b-soc",
+        .parent        = TYPE_TC27XD_SOC,
+        .class_init    = tc29b_soc_class_init,
     }, {
         .name          = TYPE_TC27XD_SOC,
         .parent        = TYPE_SYS_BUS_DEVICE,
