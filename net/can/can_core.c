@@ -103,9 +103,27 @@ static void can_bus_event_cb(void *opaque)
     if (!bus->event_count) {
         return;
     }
-    unsigned index = bus->event_head;
+    uint64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    unsigned selected = 0;
+    for (unsigned i = 1; i < bus->event_count; i++) {
+        unsigned a = (bus->event_head + selected) % ARRAY_SIZE(bus->events);
+        unsigned b = (bus->event_head + i) % ARRAY_SIZE(bus->events);
+        bool b_due = bus->events[b].deadline <= now;
+        bool a_due = bus->events[a].deadline <= now;
+        if ((b_due && !a_due) ||
+            (b_due == a_due && bus->events[b].deadline < bus->events[a].deadline) ||
+            (b_due == a_due && bus->events[b].deadline == bus->events[a].deadline &&
+             bus->events[b].frame.can_id < bus->events[a].frame.can_id)) {
+            selected = i;
+        }
+    }
+    unsigned index = (bus->event_head + selected) % ARRAY_SIZE(bus->events);
     can_bus_dispatch(bus, bus->events[index].sender, &bus->events[index].frame, 1);
-    bus->event_head = (bus->event_head + 1) % ARRAY_SIZE(bus->events);
+    for (unsigned i = selected; i + 1 < bus->event_count; i++) {
+        unsigned dst = (bus->event_head + i) % ARRAY_SIZE(bus->events);
+        unsigned src = (bus->event_head + i + 1) % ARRAY_SIZE(bus->events);
+        bus->events[dst] = bus->events[src];
+    }
     bus->event_count--;
     if (bus->event_count) {
         timer_mod_ns(bus->event_timer,
