@@ -58,6 +58,7 @@ enum {
 #define MASK_FLAGS_RFL   (1u << 28)
 #define MASK_FLAGS_TFO   (1u << 30)
 #define MASK_FLAGS_TFL   (1u << 31)
+#define MASK_FLAGS_LIN_BREAK MASK_FLAGS_BD
 
 #define MASK_RXFIFOCON_FLUSH 0x1
 #define MASK_RXFIFOCON_ENI   0x2

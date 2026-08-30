@@ -28,6 +28,7 @@ static GPtrArray *asclin_lin_bus;
 
 #define ASCLIN_LIN_GATEWAY_BYTE 0xf1
 #define ASCLIN_LIN_GATEWAY_END  0xf2
+#define ASCLIN_LIN_GATEWAY_BREAK 0xf0
 
 /*
  * TC3x register offsets are 0x00..0x50, one per 4-byte slot.
@@ -165,6 +166,16 @@ static void asclin_lin_gateway_end(TriCoreASCLINState *s)
     }
 }
 
+static void asclin_lin_bus_break(TriCoreASCLINState *s)
+{
+    if (asclin_buffer_free(s) != 0) {
+        s->lin_sync_seen = false;
+        s->lin_pid_seen = false;
+    }
+    qatomic_or(&s->regs[FLAGS], MASK_FLAGS_LIN_BREAK);
+    asclin_pulse_irq(s, MASK_FLAGS_LIN_BREAK);
+}
+
 static void asclin_lin_bus_receive(TriCoreASCLINState *s, uint8_t byte)
 {
     if (byte == 0x55) {
@@ -240,6 +251,22 @@ static void asclin_txdata_write(TriCoreASCLINState *s, uint32_t value)
     }
 
     s->txbuf = value;
+
+    if (asclin_lin_mode(s) && asclin_lin_master(s) && value == 0x55 &&
+        !s->lin_sync_seen) {
+        if (asclin_lin_bus) {
+            for (guint i = 0; i < asclin_lin_bus->len; i++) {
+                TriCoreASCLINState *peer = g_ptr_array_index(asclin_lin_bus, i);
+                if (asclin_lin_mode(peer)) {
+                    asclin_lin_bus_break(peer);
+                }
+            }
+        }
+        if (s->lin_gateway) {
+            uint8_t marker = ASCLIN_LIN_GATEWAY_BREAK;
+            qemu_chr_fe_write_all(&s->chr, &marker, 1);
+        }
+    }
 
     /* FRAMECON.LB feeds transmitted bytes back into the receive FIFO. */
     if (s->regs[FRAMECON] & (1u << 28)) {
@@ -662,8 +689,12 @@ static void uart_rx(void *opaque, const uint8_t *buf, int size)
                 size--;
                 continue;
             }
-            s->lin_gateway_rx_type = (*buf++ == ASCLIN_LIN_GATEWAY_BYTE) ?
-                                      ASCLIN_LIN_GATEWAY_BYTE : 0;
+            uint8_t record = *buf++;
+            if (record == ASCLIN_LIN_GATEWAY_BREAK) {
+                asclin_lin_bus_break(s);
+            }
+            s->lin_gateway_rx_type = (record == ASCLIN_LIN_GATEWAY_BYTE) ?
+                                     ASCLIN_LIN_GATEWAY_BYTE : 0;
             size--;
             continue;
         }
