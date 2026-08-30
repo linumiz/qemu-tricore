@@ -119,6 +119,12 @@ static void asclin_pulse_irq(TriCoreASCLINState *s, uint32_t pulse_mask)
     }
 }
 
+static bool asclin_lin_mode(TriCoreASCLINState *s)
+{
+    /* FRAMECON.MODE=3 is LIN (TC2x/TC3x ASCLIN definition). */
+    return ((s->regs[FRAMECON] >> 0) & 0x7) == 3;
+}
+
 /*
  * Retry callback when the chardev backend was busy on the last attempt.
  */
@@ -142,6 +148,9 @@ static gboolean uart_transmit_watch(void *do_not_use, GIOCondition cond,
 
 drained:
     qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TFL | MASK_FLAGS_TC);
+    if (asclin_lin_mode(s)) {
+        qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TH | MASK_FLAGS_TR);
+    }
     asclin_pulse_irq(s, MASK_FLAGS_TFL | MASK_FLAGS_TC);
     return G_SOURCE_REMOVE;
 }
@@ -187,6 +196,9 @@ static void asclin_txdata_write(TriCoreASCLINState *s, uint32_t value)
 
 drained:
     qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TFL | MASK_FLAGS_TC);
+    if (asclin_lin_mode(s)) {
+        qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TH | MASK_FLAGS_TR);
+    }
     asclin_pulse_irq(s, MASK_FLAGS_TFL | MASK_FLAGS_TC);
 }
 
@@ -564,6 +576,9 @@ static void uart_rx(void *opaque, const uint8_t *buf, int size)
 
     if (s->rxbufreadidx != s->rxbufwriteidx) {
         qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RFL);
+        if (asclin_lin_mode(s)) {
+            qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RH | MASK_FLAGS_RR);
+        }
         asclin_pulse_irq(s, MASK_FLAGS_RFL);
     }
 }
