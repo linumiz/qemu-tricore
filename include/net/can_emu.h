@@ -85,6 +85,16 @@ typedef struct qemu_can_filter {
 #define QEMU_CAN_INV_FILTER 0x20000000U
 
 typedef struct CanBusClientState CanBusClientState;
+typedef struct CanBusBitClientInfo CanBusBitClientInfo;
+
+typedef struct CanBusBitSample {
+    bool level;
+    uint64_t timestamp_ns;
+} CanBusBitSample;
+
+struct CanBusBitClientInfo {
+    void (*sample)(CanBusClientState *, const CanBusBitSample *sample);
+};
 
 #define TYPE_CAN_BUS "can-bus"
 OBJECT_DECLARE_SIMPLE_TYPE(CanBusState, CAN_BUS)
@@ -105,6 +115,7 @@ struct CanBusClientState {
     char *name;
     void (*destructor)(CanBusClientState *);
     bool fd_mode;
+    CanBusBitClientInfo *bit_info;
 };
 
 int can_bus_filter_match(struct qemu_can_filter *filter, qemu_canid_t can_id);
@@ -121,6 +132,12 @@ ssize_t can_bus_client_send(CanBusClientState *,
 ssize_t can_bus_client_send_timed(CanBusClientState *,
                                   const struct qemu_can_frame *frames,
                                   size_t frames_cnt, uint64_t delay_ns);
+
+/* Deliver a bitstream as timestamped virtual-time samples to bit-capable
+ * peers.  Frame-based clients are intentionally ignored. */
+ssize_t can_bus_client_send_bits(CanBusClientState *, const uint8_t *bits,
+                                 size_t bit_count, uint64_t bit_time_ns,
+                                 uint64_t start_time_ns);
 
 int can_bus_client_set_filters(CanBusClientState *,
                                const struct qemu_can_filter *filters,

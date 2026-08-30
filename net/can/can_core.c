@@ -192,6 +192,29 @@ ssize_t can_bus_client_send_timed(CanBusClientState *client,
     return 0;
 }
 
+ssize_t can_bus_client_send_bits(CanBusClientState *client,
+                                 const uint8_t *bits, size_t bit_count,
+                                 uint64_t bit_time_ns, uint64_t start_time_ns)
+{
+    CanBusState *bus = client->bus;
+    if (!bus || !bits || !bit_count || !bit_time_ns) {
+        return -1;
+    }
+    for (size_t i = 0; i < bit_count; i++) {
+        CanBusBitSample sample = {
+            .level = (bits[i / 8] >> (i % 8)) & 1,
+            .timestamp_ns = start_time_ns + i * bit_time_ns,
+        };
+        CanBusClientState *peer;
+        QTAILQ_FOREACH(peer, &bus->clients, next) {
+            if (peer != client && peer->bit_info && peer->bit_info->sample) {
+                peer->bit_info->sample(peer, &sample);
+            }
+        }
+    }
+    return bit_count;
+}
+
 int can_bus_filter_match(struct qemu_can_filter *filter, qemu_canid_t can_id)
 {
     int m;
