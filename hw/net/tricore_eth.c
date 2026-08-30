@@ -1,3 +1,15 @@
+/*
+ * AURIX Ethernet emulation based solely on publicly distributed material.
+ *
+ * Register offsets, descriptor bit positions and the MDIO/PHY programming
+ * model were derived from the public TC2x/TC3x/TC4x User Manuals and from
+ * the corresponding Infineon iLLD sources shipped with this project
+ * (IfxEth_*, IfxGeth_* and IfxLeth_* register/driver definitions).  This
+ * implementation does not use, reproduce or depend on NDA-only manuals,
+ * vendor RTL, firmware binaries, or confidential electrical/SerDes details.
+ * The HSPHY/SerDes layer is intentionally represented by an abstract PHY.
+ */
+
 #include "qemu/osdep.h"
 #include "hw/net/tricore_eth.h"
 #include "hw/core/irq.h"
