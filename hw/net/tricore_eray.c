@@ -248,6 +248,11 @@ static void eray_commit_message(TriCoreERAYState *s)
     uint32_t payload_len = ldl_le_p(&s->msg_data[offset + 4]) & 0x7f;
     uint32_t encoded_payload_len = payload_len;
     uint32_t header_flags = ldl_le_p(&s->msg_data[offset + 8]);
+    uint32_t header_cycle = (header_flags & ERAY_HDR_CYCLE_MASK) >>
+                            ERAY_HDR_CYCLE_SHIFT;
+    bool null_frame = header_flags & ERAY_HDR_NULL;
+    bool sync_frame = header_flags & ERAY_HDR_SYNC;
+    bool startup_frame = header_flags & ERAY_HDR_STARTUP;
     if (!payload_len) {
         payload_len = 64;
     }
@@ -255,9 +260,18 @@ static void eray_commit_message(TriCoreERAYState *s)
      * header: word 0 is the 11-bit frame ID, word 1 the payload length, and
      * word 2 carries null/sync/startup flags.  Reject IDs outside the public
      * FlexRay range and lengths that cannot fit this 64-byte model. */
+    /* FlexRay header indicators have protocol-level relationships: a null
+     * frame carries no payload and cannot be sync/startup, while startup
+     * frames are necessarily sync frames.  A non-zero cycle field is an
+     * explicit cycle selector and must match the controller's current cycle.
+     * These checks are derived from the public ERAY manuals/iLLD headers and
+     * keep malformed host fixtures from entering the virtual bus. */
     if ((frame_id & ~0x7ffu) || encoded_payload_len > sizeof(s->tx_frame) ||
         (header_flags & ~ERAY_HDR_PUBLIC_MASK) ||
-        ((header_flags & ERAY_HDR_NULL) && encoded_payload_len != 0)) {
+        (null_frame && (encoded_payload_len != 0 || sync_frame ||
+                        startup_frame)) ||
+        (startup_frame && !sync_frame) ||
+        (header_cycle && header_cycle != (s->cycle & 0x3f))) {
         s->ccev |= CCEV_HEADER_ERROR;
         s->host_busy_ch[channel] = 0;
         s->host_busy = 0;
@@ -271,7 +285,8 @@ static void eray_commit_message(TriCoreERAYState *s)
     /* The portable bus models a static-slot transfer at the programmed cycle.
      * A/B selection is retained in slot_status while both channels share the
      * same deterministic virtual timebase. */
-    s->slot_status = (frame_id & 0x7ff) | ((s->cycle & 0x3f) << 16) |
+    uint32_t effective_cycle = header_cycle ? header_cycle : (s->cycle & 0x3f);
+    s->slot_status = (frame_id & 0x7ff) | (effective_cycle << 16) |
                      ((payload_len & 0x7f) << 8) |
                      ((s->mbctrl & MBCTRL_CHANNEL_B) ? BIT(31) : 0);
     s->tx_header_flags = header_flags;

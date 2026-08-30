@@ -108,6 +108,32 @@ static void test_eray_profiles(void)
     qtest_writel(global_qtest, 0xF441D104, 1);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C104) & 1, ==, 0);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D104) & 1, ==, 0);
+    /* Startup implies sync; the valid pair is decoded into SLOTSTAT. */
+    qtest_writel(global_qtest, 0xF441E000, 1);
+    qtest_writel(global_qtest, 0xF441E004, 0);
+    qtest_writel(global_qtest, 0xF441E008, 6); /* SYNC | STARTUP */
+    qtest_writel(global_qtest, 0xF441C124, 0);
+    qtest_writel(global_qtest, 0xF441C128, 2);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C104) & 2, ==, 0);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C120) & 6, ==, 6);
+    /* Null+sync and startup-without-sync are rejected as header errors. */
+    qtest_writel(global_qtest, 0xF441E008, 3); /* NULL | SYNC */
+    qtest_writel(global_qtest, 0xF441C128, 2);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C104) & 2, !=, 0);
+    qtest_writel(global_qtest, 0xF441C104, 2);
+    qtest_writel(global_qtest, 0xF441E008, 4); /* STARTUP without SYNC */
+    qtest_writel(global_qtest, 0xF441C128, 2);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C104) & 2, !=, 0);
+    qtest_writel(global_qtest, 0xF441C104, 2);
+    /* A non-zero cycle selector must match the active controller cycle. */
+    qtest_writel(global_qtest, 0xF441E008, (1u << 8) | 2);
+    qtest_writel(global_qtest, 0xF441C128, 2);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C104) & 2, !=, 0);
+    qtest_writel(global_qtest, 0xF441C104, 2);
     /* Header validation rejects a payload that cannot fit the public 64-byte
      * message-RAM fixture and reports the documented header error event. */
     qtest_writel(global_qtest, 0xF441E000, 0x10);
