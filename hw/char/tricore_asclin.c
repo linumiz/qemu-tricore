@@ -155,7 +155,26 @@ static void asclin_txdata_write(TriCoreASCLINState *s, uint32_t value)
 {
     int ret;
 
+    /* CLC.DISR gates the module clock and suppresses transfers. */
+    if (s->regs[CLC] & 1u) {
+        return;
+    }
+
     s->txbuf = value;
+
+    /* FRAMECON.LB feeds transmitted bytes back into the receive FIFO. */
+    if (s->regs[FRAMECON] & (1u << 28)) {
+        if (asclin_buffer_free(s) == 0) {
+            qatomic_or(&s->regs[FLAGS], MASK_FLAGS_TFO);
+            asclin_pulse_irq(s, MASK_FLAGS_TFO);
+        } else {
+            s->rxbuf[s->rxbufwriteidx] = value;
+            s->rxbufwriteidx = (s->rxbufwriteidx + 1) % ASCLIN_RX_BUFFER;
+            qatomic_or(&s->regs[FLAGS], MASK_FLAGS_RFL);
+            asclin_pulse_irq(s, MASK_FLAGS_RFL);
+        }
+    }
+
     ret = qemu_chr_fe_write_all(&s->chr, (uint8_t *)&s->txbuf, 1);
     if (ret <= 0) {
         s->watch_tag = qemu_chr_fe_add_watch(&s->chr, G_IO_OUT | G_IO_HUP,
@@ -548,7 +567,8 @@ static int uart_can_rx(void *opaque)
 {
     TriCoreASCLINState *s = TRICORE_ASCLIN(opaque);
 
-    if ((s->regs[RXFIFOCON] & MASK_RXFIFOCON_ENI) &&
+    if (!(s->regs[CLC] & 1u) &&
+        (s->regs[RXFIFOCON] & MASK_RXFIFOCON_ENI) &&
         asclin_buffer_free(s) > 0) {
         return 1;
     }
