@@ -49,6 +49,13 @@ static void test_eray_profiles(void)
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D100), ==, 1);
     qtest_writel(global_qtest, 0xF441C118, 3);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C100), ==, 0x0d);
+    qtest_writel(global_qtest, 0xF441D118, 3);
+    /* ERAY0 message RAM is at +0x2000; commit one buffer and observe it on
+     * the second in-process node through NDAT/MBSC pending state. */
+    qtest_writel(global_qtest, 0xF441E000, 0x123);
+    qtest_writel(global_qtest, 0xF441C124, 0);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D12C), ==, 1);
     qtest_quit(global_qtest);
 }
 

@@ -198,7 +198,8 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
             return;
         }
         sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, eray_base[i]);
-        sysbus_mmio_map(SYS_BUS_DEVICE(dev), 1, eray_base[i] + 0x1000);
+        /* Keep each message RAM outside the adjacent ERAY register window. */
+        sysbus_mmio_map(SYS_BUS_DEVICE(dev), 1, eray_base[i] + 0x2000);
         sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0,
                            qdev_get_gpio_in_named(DEVICE(&s->ir), "irq",
                                                   720 + i * 2));
