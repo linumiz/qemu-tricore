@@ -40,6 +40,8 @@
 #define ERAY_FSR 0x158
 #define ERAY_MRC 0x15c
 #define ERAY_FCL 0x160
+#define ERAY_FILTER_ID 0x164
+#define ERAY_FILTER_CYCLE 0x168
 
 #define CCSV_POC_SHIFT 0
 #define CCSV_POC_MASK  0x3f
@@ -85,7 +87,8 @@ static void eray_scheduler_cb(void *opaque)
 
 static void eray_schedule(TriCoreERAYState *s)
 {
-    timer_mod(s->scheduler, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + ERAY_CYCLE_NS);
+    timer_mod(s->scheduler, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+              (s->sched_period_ns ? s->sched_period_ns : ERAY_CYCLE_NS));
 }
 
 static void eray_update_irq(TriCoreERAYState *s)
@@ -98,15 +101,35 @@ static void eray_command(TriCoreERAYState *s, uint32_t cmd)
 {
     s->command = cmd;
     switch (cmd & 0xff) {
-    case CMD_CONFIG: s->ccsv = POC_CONFIG; break;
-    case CMD_READY: s->ccsv = POC_READY; break;
-    case CMD_COLDSTART: s->ccsv = POC_NORMAL_ACTIVE; s->cycle = 0; eray_schedule(s); break;
-    case CMD_RUN: s->ccsv = POC_NORMAL_ACTIVE; eray_schedule(s); break;
-    case CMD_HALT: s->ccsv = POC_HALT; timer_del(s->scheduler); break;
+    case CMD_CONFIG:
+        if (s->ccsv != POC_CONFIG && s->ccsv != POC_HALT) goto invalid;
+        s->ccsv = POC_CONFIG;
+        break;
+    case CMD_READY:
+        if (s->ccsv != POC_CONFIG) goto invalid;
+        s->ccsv = POC_READY;
+        break;
+    case CMD_COLDSTART:
+        if (s->ccsv != POC_READY && s->ccsv != POC_CONFIG) goto invalid;
+        s->ccsv = POC_NORMAL_ACTIVE; s->cycle = 0; eray_schedule(s);
+        break;
+    case CMD_RUN:
+        if (s->ccsv != POC_READY && s->ccsv != POC_HALT) goto invalid;
+        s->ccsv = POC_NORMAL_ACTIVE; eray_schedule(s);
+        break;
+    case CMD_HALT:
+        if (s->ccsv != POC_NORMAL_ACTIVE) goto invalid;
+        s->ccsv = POC_HALT; timer_del(s->scheduler);
+        break;
     case CMD_WAKEUP: s->ccsv = POC_READY; break;
     case CMD_FREEZE: s->ccsv = POC_HALT; timer_del(s->scheduler); break;
-    default: s->ccev |= BIT(0); break;
+    default: goto invalid;
     }
+    eray_update_irq(s);
+    return;
+invalid:
+    /* Public ERAY command handling reports an illegal transition in CCEV. */
+    s->ccev |= BIT(0);
     eray_update_irq(s);
 }
 
@@ -114,6 +137,10 @@ static void eray_commit_message(TriCoreERAYState *s)
 {
     uint32_t offset = (s->mbid & 0xff) * 64;
     uint32_t frame_id = ldl_le_p(&s->msg_data[offset]);
+    uint32_t payload_len = ldl_le_p(&s->msg_data[offset + 4]) & 0x7f;
+    if (!payload_len || payload_len > 64) {
+        payload_len = 64;
+    }
     if (!(s->mbctrl & MBCTRL_COMMIT) || offset + 64 > sizeof(s->msg_data)) {
         s->ccev |= BIT(1);
         return;
@@ -122,6 +149,7 @@ static void eray_commit_message(TriCoreERAYState *s)
      * A/B selection is retained in slot_status while both channels share the
      * same deterministic virtual timebase. */
     s->slot_status = (frame_id & 0x7ff) | ((s->cycle & 0x3f) << 16) |
+                     ((payload_len & 0x7f) << 8) |
                      ((s->mbctrl & MBCTRL_CHANNEL_B) ? BIT(31) : 0);
     if (s->guardian || !(s->channel_mask & ((s->mbctrl & MBCTRL_CHANNEL_B) ? 2 : 1))) {
         s->ccev |= BIT(3); /* bus guardian/channel violation */
@@ -139,6 +167,7 @@ static void eray_commit_message(TriCoreERAYState *s)
         memcpy(s->tx_frame, &s->msg_data[offset], sizeof(s->tx_frame));
         s->tx_frame_id = frame_id;
         s->tx_due_cycle = (s->cycle + 1) & 0x3f;
+        s->tx_payload_len = payload_len;
         s->tx_pending = true;
         s->mbsc1 |= BIT(s->mbid & 31);
         eray_update_irq(s);
@@ -158,6 +187,17 @@ static void eray_deliver_frame(TriCoreERAYState *s, uint32_t frame_id,
         /* The public ERAY channel-selection bits gate reception independently
          * on A and B; do not deliver a frame to a disconnected channel. */
         if (!(peer->channel_mask & ((s->mbctrl & MBCTRL_CHANNEL_B) ? 2 : 1))) {
+            continue;
+        }
+        if (peer->slot_filter && peer->slot_filter != (frame_id & 0x7ff)) {
+            continue;
+        }
+        if (peer->cycle_filter && peer->cycle_filter != (s->cycle & 0x3f)) {
+            continue;
+        }
+        if (peer->last_rx_id == (frame_id & 0x7ff) &&
+            peer->last_rx_cycle == (s->cycle & 0x3f)) {
+            /* A/B copies of one FlexRay frame are one logical reception. */
             continue;
         }
         uint32_t peer_off = (s->mbid & 0xff) * 64;
@@ -180,6 +220,9 @@ static void eray_deliver_frame(TriCoreERAYState *s, uint32_t frame_id,
         memcpy(&peer->msg_data[peer_off], frame, 64);
         peer->ndat1 |= BIT(s->mbid & 31);
         peer->mbsc1 |= BIT(s->mbid & 31);
+        peer->last_rx_id = frame_id & 0x7ff;
+        peer->last_rx_cycle = s->cycle & 0x3f;
+        peer->last_rx_channel = (s->mbctrl & MBCTRL_CHANNEL_B) ? 1 : 0;
         peer->slot_status = s->slot_status;
         eray_update_irq(peer);
     }
@@ -203,7 +246,7 @@ static uint64_t eray_read(void *opaque, hwaddr off, unsigned size)
     case ERAY_MBID: return s->mbid;
     case ERAY_MBCTRL: return s->mbctrl;
     case ERAY_MBPENDING: return s->mbsc1 | s->ndat1;
-    case ERAY_SCHED_CFG: return s->sched_cfg;
+    case ERAY_SCHED_CFG: return s->sched_cfg | ((s->sched_period_ns / 1000) << 8);
     case ERAY_STATIC_SLOTS: return s->static_slots;
     case ERAY_DYNAMIC_START: return s->dynamic_start;
     case ERAY_MINISLOT: return s->minislot;
@@ -216,6 +259,8 @@ static uint64_t eray_read(void *opaque, hwaddr off, unsigned size)
     case ERAY_FSR: return s->fifo_status;
     case ERAY_MRC: return s->fifo_start;
     case ERAY_FCL: return s->fifo_depth;
+    case ERAY_FILTER_ID: return s->slot_filter;
+    case ERAY_FILTER_CYCLE: return s->cycle_filter;
     default: return 0;
     }
 }
@@ -240,7 +285,13 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
     case ERAY_MINISLOT: s->minislot = value & 0xff; break;
     case ERAY_GUARDIAN: s->guardian = value & 1; break;
     case ERAY_CHANNEL: s->channel_mask = value & 3; break;
-    case ERAY_SCHED_CFG: s->sched_cfg = value & 1; break;
+    case ERAY_SCHED_CFG:
+        s->sched_cfg = value & 1;
+        s->sched_period_ns = ((value >> 8) & 0xffff) * 1000;
+        if (!s->sched_period_ns) {
+            s->sched_period_ns = ERAY_CYCLE_NS;
+        }
+        break;
     case ERAY_SUCC2: s->succ2 = value; break;
     case ERAY_SUCC3: s->succ3 = value; break;
     case ERAY_PRTC1: s->prtc1 = value; break;
@@ -248,6 +299,8 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
     case ERAY_MRC: s->fifo_start = value & 0xff; break;
     case ERAY_FCL: s->fifo_depth = value & 0xff; break;
     case ERAY_FSR: s->fifo_status &= ~value; break; /* status W1C */
+    case ERAY_FILTER_ID: s->slot_filter = value & 0x7ff; break;
+    case ERAY_FILTER_CYCLE: s->cycle_filter = value & 0x3f; break;
     default: break;
     }
     eray_update_irq(s);
@@ -270,8 +323,13 @@ static void eray_reset(DeviceState *dev)
     s->static_slots = 64; s->dynamic_start = 65; s->minislot = 1;
     s->guardian = 0; s->channel_mask = 3;
     s->fifo_start = s->fifo_depth = s->fifo_status = 0;
+    s->slot_filter = s->cycle_filter = 0;
+    s->last_rx_id = s->last_rx_cycle = 0;
+    s->last_rx_channel = 0;
     s->sched_cfg = s->tx_frame_id = s->tx_due_cycle = 0;
+    s->sched_period_ns = ERAY_CYCLE_NS;
     s->tx_pending = false;
+    s->tx_payload_len = 0;
     memset(s->tx_frame, 0, sizeof(s->tx_frame));
     timer_del(s->scheduler);
     memset(s->msg_data, 0, sizeof(s->msg_data));
@@ -301,6 +359,18 @@ static void eray_realize(DeviceState *dev, Error **errp)
     QTAILQ_INSERT_TAIL(&eray_bus, s, bus_node);
 }
 
+static void eray_unrealize(DeviceState *dev)
+{
+    TriCoreERAYState *s = TRICORE_ERAY(dev);
+
+    /* A QTest instance may create and destroy several machines in one
+     * process.  Remove the node from the portable in-process bus on teardown
+     * so a later machine cannot receive frames through a stale peer pointer. */
+    QTAILQ_REMOVE(&eray_bus, s, bus_node);
+    timer_free(s->scheduler);
+    s->scheduler = NULL;
+}
+
 static const VMStateDescription vmstate_eray = {
     .name = TYPE_TRICORE_ERAY, .version_id = 1, .minimum_version_id = 1,
     .fields = (const VMStateField[]) {
@@ -317,9 +387,16 @@ static const VMStateDescription vmstate_eray = {
         VMSTATE_UINT32(channel_mask, TriCoreERAYState),
         VMSTATE_UINT32(fifo_start, TriCoreERAYState), VMSTATE_UINT32(fifo_depth, TriCoreERAYState),
         VMSTATE_UINT32(fifo_status, TriCoreERAYState),
+        VMSTATE_UINT32(slot_filter, TriCoreERAYState),
+        VMSTATE_UINT32(cycle_filter, TriCoreERAYState),
+        VMSTATE_UINT32(last_rx_id, TriCoreERAYState),
+        VMSTATE_UINT32(last_rx_cycle, TriCoreERAYState),
+        VMSTATE_UINT8(last_rx_channel, TriCoreERAYState),
         VMSTATE_UINT32(sched_cfg, TriCoreERAYState),
+        VMSTATE_UINT32(sched_period_ns, TriCoreERAYState),
         VMSTATE_UINT32(tx_frame_id, TriCoreERAYState),
         VMSTATE_UINT32(tx_due_cycle, TriCoreERAYState),
+        VMSTATE_UINT32(tx_payload_len, TriCoreERAYState),
         VMSTATE_BOOL(tx_pending, TriCoreERAYState),
         VMSTATE_UINT8_ARRAY(tx_frame, TriCoreERAYState, 64),
         VMSTATE_UINT8_ARRAY(msg_data, TriCoreERAYState, sizeof(((TriCoreERAYState *)0)->msg_data)),
@@ -331,6 +408,7 @@ static void eray_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     dc->realize = eray_realize;
+    dc->unrealize = eray_unrealize;
     device_class_set_legacy_reset(dc, eray_reset);
     dc->vmsd = &vmstate_eray;
 }
