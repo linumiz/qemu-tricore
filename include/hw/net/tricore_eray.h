@@ -8,6 +8,7 @@
 #define HW_NET_TRICORE_ERAY_H
 
 #include "hw/core/sysbus.h"
+#include "qemu/queue.h"
 
 /* Register/message layout follows the public AURIX ERAY User Manuals and
  * the publicly available Infineon IfxEray_* headers. */
@@ -24,6 +25,8 @@ typedef struct TriCoreERAYState {
     uint32_t command;
     uint32_t cycle;
     uint32_t slot_status;
+    uint32_t mbid, mbctrl;
+    QTAILQ_ENTRY(TriCoreERAYState) bus_node;
     uint8_t msg_data[16 * 1024];
 } TriCoreERAYState;
 

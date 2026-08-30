@@ -24,6 +24,9 @@
 #define ERAY_CMD       0x118
 #define ERAY_CYCLE     0x11c
 #define ERAY_SLOTSTAT  0x120
+#define ERAY_MBID      0x124
+#define ERAY_MBCTRL    0x128
+#define ERAY_MBPENDING 0x12c
 
 #define CCSV_POC_SHIFT 0
 #define CCSV_POC_MASK  0x3f
@@ -36,6 +39,12 @@
 #define CMD_COLDSTART  0x03
 #define CMD_RUN        0x04
 #define CMD_HALT       0x05
+#define MBCTRL_COMMIT  BIT(0)
+#define MBCTRL_UNLOCK  BIT(1)
+#define MBCTRL_CHANNEL_B BIT(2)
+
+static QTAILQ_HEAD(, TriCoreERAYState) eray_bus =
+    QTAILQ_HEAD_INITIALIZER(eray_bus);
 
 static void eray_update_irq(TriCoreERAYState *s)
 {
@@ -57,6 +66,33 @@ static void eray_command(TriCoreERAYState *s, uint32_t cmd)
     eray_update_irq(s);
 }
 
+static void eray_commit_message(TriCoreERAYState *s)
+{
+    TriCoreERAYState *peer;
+    uint32_t offset = (s->mbid & 0xff) * 64;
+    uint32_t frame_id = ldl_le_p(&s->msg_data[offset]);
+    if (!(s->mbctrl & MBCTRL_COMMIT) || offset + 64 > sizeof(s->msg_data)) {
+        s->ccev |= BIT(1);
+        return;
+    }
+    /* The portable bus models a static-slot transfer at the programmed cycle.
+     * A/B selection is retained in slot_status while both channels share the
+     * same deterministic virtual timebase. */
+    s->slot_status = (frame_id & 0x7ff) | ((s->cycle & 0x3f) << 16) |
+                     ((s->mbctrl & MBCTRL_CHANNEL_B) ? BIT(31) : 0);
+    QTAILQ_FOREACH(peer, &eray_bus, bus_node) {
+        if (peer == s || peer->ccsv != POC_NORMAL_ACTIVE) continue;
+        uint32_t peer_off = (s->mbid & 0xff) * 64;
+        memcpy(&peer->msg_data[peer_off], &s->msg_data[offset], 64);
+        peer->ndat1 |= BIT(s->mbid & 31);
+        peer->mbsc1 |= BIT(s->mbid & 31);
+        peer->slot_status = s->slot_status;
+        eray_update_irq(peer);
+    }
+    s->mbsc1 |= BIT(s->mbid & 31);
+    eray_update_irq(s);
+}
+
 static uint64_t eray_read(void *opaque, hwaddr off, unsigned size)
 {
     TriCoreERAYState *s = opaque;
@@ -70,6 +106,9 @@ static uint64_t eray_read(void *opaque, hwaddr off, unsigned size)
     case ERAY_CMD: return s->command;
     case ERAY_CYCLE: return s->cycle;
     case ERAY_SLOTSTAT: return s->slot_status;
+    case ERAY_MBID: return s->mbid;
+    case ERAY_MBCTRL: return s->mbctrl;
+    case ERAY_MBPENDING: return s->mbsc1 | s->ndat1;
     default: return 0;
     }
 }
@@ -87,6 +126,8 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
     case ERAY_CMD: eray_command(s, value); break;
     case ERAY_CYCLE: s->cycle = value & 0xff; break;
     case ERAY_SLOTSTAT: s->slot_status = value; break;
+    case ERAY_MBID: s->mbid = value & 0xff; break;
+    case ERAY_MBCTRL: s->mbctrl = value; if (value & MBCTRL_COMMIT) eray_commit_message(s); break;
     default: break;
     }
     eray_update_irq(s);
@@ -104,6 +145,7 @@ static void eray_reset(DeviceState *dev)
     s->ccsv = POC_CONFIG;
     s->ccev = s->succ1 = s->nemc = s->mbsc1 = s->ndat1 = 0;
     s->command = s->cycle = s->slot_status = 0;
+    s->mbid = s->mbctrl = 0;
     memset(s->msg_data, 0, sizeof(s->msg_data));
     eray_update_irq(s);
 }
@@ -124,6 +166,7 @@ static void eray_realize(DeviceState *dev, Error **errp)
                           "tricore-eray", 0x1000);
     memory_region_init_ram(&s->msg_ram, OBJECT(dev), "tricore-eray-msg-ram",
                            sizeof(s->msg_data), &error_fatal);
+    QTAILQ_INSERT_TAIL(&eray_bus, s, bus_node);
 }
 
 static const VMStateDescription vmstate_eray = {
@@ -133,7 +176,8 @@ static const VMStateDescription vmstate_eray = {
         VMSTATE_UINT32(succ1, TriCoreERAYState), VMSTATE_UINT32(nemc, TriCoreERAYState),
         VMSTATE_UINT32(mbsc1, TriCoreERAYState), VMSTATE_UINT32(ndat1, TriCoreERAYState),
         VMSTATE_UINT32(command, TriCoreERAYState), VMSTATE_UINT32(cycle, TriCoreERAYState),
-        VMSTATE_UINT32(slot_status, TriCoreERAYState), VMSTATE_END_OF_LIST()
+        VMSTATE_UINT32(slot_status, TriCoreERAYState), VMSTATE_UINT32(mbid, TriCoreERAYState),
+        VMSTATE_UINT32(mbctrl, TriCoreERAYState), VMSTATE_END_OF_LIST()
     }
 };
 
