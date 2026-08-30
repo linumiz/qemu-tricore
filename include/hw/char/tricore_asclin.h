@@ -105,6 +105,7 @@ struct TriCoreASCLINState {
     uint8_t rxbuf[ASCLIN_RX_BUFFER];
     uint32_t rxbufwriteidx;
     uint32_t rxbufreadidx;
+    bool block_tx_enabled;
     ptimer_state *ptimer;
     QEMUBH *bh;
 };

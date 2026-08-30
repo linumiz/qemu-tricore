@@ -457,7 +457,12 @@ static void uart_write(void *opaque, hwaddr offset, uint64_t value,
         s->regs[BLOCK_TXDATA_LEN] = val;
         break;
     case BLOCK_TXDATA_BUF:
-        asclin_txdata_block(s, val);
+        if (s->block_tx_enabled) {
+            asclin_txdata_block(s, val);
+        } else {
+            qemu_log_mask(LOG_GUEST_ERROR,
+                "asclin_uart: QEMU block-TX extension disabled\n");
+        }
         break;
 
     /* TC4x */
@@ -669,6 +674,7 @@ static const VMStateDescription vmstate_asclin_uart = {
         VMSTATE_UINT8_ARRAY(rxbuf, TriCoreASCLINState, ASCLIN_RX_BUFFER),
         VMSTATE_UINT32(rxbufwriteidx, TriCoreASCLINState),
         VMSTATE_UINT32(rxbufreadidx, TriCoreASCLINState),
+        VMSTATE_BOOL(block_tx_enabled, TriCoreASCLINState),
         VMSTATE_END_OF_LIST()
     },
     .post_load = asclin_uart_post_load,
@@ -676,6 +682,8 @@ static const VMStateDescription vmstate_asclin_uart = {
 
 static const Property asclin_uart_properties[] = {
     DEFINE_PROP_CHR("chardev", TriCoreASCLINState, chr),
+    DEFINE_PROP_BOOL("block-tx-enabled", TriCoreASCLINState,
+                     block_tx_enabled, true),
 };
 
 static void asclin_uart_class_init(ObjectClass *klass, const void *data)
