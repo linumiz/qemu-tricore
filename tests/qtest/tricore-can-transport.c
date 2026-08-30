@@ -109,6 +109,8 @@ static void test_eray_profiles(void)
     qtest_writel(global_qtest, 0xF441D114, 0xffffffff);
     qtest_writel(global_qtest, 0xF441D0f4, 0xffffffff);
     qtest_writel(global_qtest, 0xF441D0f0, 0xffffffff);
+    qtest_writel(global_qtest, 0xF441C134, 1); /* one static slot */
+    qtest_writel(global_qtest, 0xF441C138, 2); /* dynamic segment starts at 2 */
     qtest_writel(global_qtest, 0xF441C130, 1);
     qtest_writel(global_qtest, 0xF441E000, 101);
     qtest_writel(global_qtest, 0xF441C128, 2); /* unlock */
@@ -116,6 +118,9 @@ static void test_eray_profiles(void)
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D12c), ==, 0);
     qtest_clock_step(global_qtest, 1000);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D12c), !=, 0);
+    qtest_clock_step(global_qtest, 1000);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441C120) & (1u << 30),
+                     !=, 0);
     /* A frame outside both configured static and dynamic slot ranges is
      * rejected before it can become a pending transmission. */
     qtest_writel(global_qtest, 0xF441C134, 0);

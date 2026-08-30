@@ -40,6 +40,7 @@ typedef struct TriCoreERAYState {
     uint8_t last_rx_channel;
     uint32_t sched_cfg;
     uint32_t sched_period_ns;
+    uint32_t slot_counter, minislot_counter;
     uint32_t tx_frame_id, tx_due_cycle, tx_due_slot, tx_payload_len;
     uint32_t tx_header_flags;
     bool tx_pending;

@@ -114,8 +114,22 @@ static void eray_scheduler_cb(void *opaque)
 {
     TriCoreERAYState *s = opaque;
     if (s->ccsv == POC_NORMAL_ACTIVE) {
+        uint32_t dynamic_slots = s->dynamic_start ? (256 - s->dynamic_start) : 256;
+        uint32_t total_slots = MAX(1u, MIN(2048u, s->static_slots + dynamic_slots));
+        s->slot_counter = (s->slot_counter + 1) % total_slots;
+        if (s->slot_counter >= s->static_slots) {
+            /* Dynamic slots advance through minislots; this counter is kept
+             * in SaveVM so a migrated scheduler resumes at the same point. */
+            s->minislot_counter = (s->minislot_counter + 1) & 0xff;
+        } else {
+            s->minislot_counter = 0;
+        }
         s->cycle = (s->cycle + 1) % MAX(1, s->cycle_length);
-        s->slot_status = (s->slot_status & 0x80000000) | (s->cycle << 16);
+        s->slot_status = (s->slot_status & 0x80000000) |
+                         (s->cycle << 16) | (s->slot_counter & 0x7ff);
+        if (s->slot_counter >= s->static_slots) {
+            s->slot_status |= BIT(30) | (s->minislot_counter << 8);
+        }
         s->ccev |= CCEV_CYCLE_START;
         if (s->tx_pending && s->cycle == s->tx_due_cycle) {
             /* A pending request is released only at its configured slot.  A
@@ -493,6 +507,7 @@ static void eray_reset(DeviceState *dev)
     s->last_rx_id = s->last_rx_cycle = 0;
     s->last_rx_channel = 0;
     s->sched_cfg = s->tx_frame_id = s->tx_due_cycle = s->tx_due_slot = 0;
+    s->slot_counter = s->minislot_counter = 0;
     s->tx_header_flags = 0;
     s->sched_period_ns = ERAY_CYCLE_NS;
     s->tx_pending = false;
@@ -571,6 +586,8 @@ static const VMStateDescription vmstate_eray = {
         VMSTATE_UINT8(last_rx_channel, TriCoreERAYState),
         VMSTATE_UINT32(sched_cfg, TriCoreERAYState),
         VMSTATE_UINT32(sched_period_ns, TriCoreERAYState),
+        VMSTATE_UINT32(slot_counter, TriCoreERAYState),
+        VMSTATE_UINT32(minislot_counter, TriCoreERAYState),
         VMSTATE_UINT32(tx_frame_id, TriCoreERAYState),
         VMSTATE_UINT32(tx_due_cycle, TriCoreERAYState),
         VMSTATE_UINT32(tx_due_slot, TriCoreERAYState),
