@@ -30,6 +30,10 @@ typedef struct TriCoreERAYState {
     uint32_t mbid, mbctrl;
     uint32_t static_slots, dynamic_start, minislot, guardian, channel_mask;
     uint32_t fifo_start, fifo_depth, fifo_status;
+    uint32_t sched_cfg;
+    uint32_t tx_frame_id, tx_due_cycle;
+    bool tx_pending;
+    uint8_t tx_frame[64];
     QEMUTimer *scheduler;
     QTAILQ_ENTRY(TriCoreERAYState) bus_node;
     uint8_t msg_data[16 * 1024];
