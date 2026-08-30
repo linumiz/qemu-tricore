@@ -212,6 +212,15 @@ static void test_eray_profiles(void)
     qtest_writel(global_qtest, 0xF441C130, 1);
     qtest_writel(global_qtest, 0xF441C190, 3); /* dynamic action point */
     qtest_writel(global_qtest, 0xF441C124, 0); /* select buffer 0 again */
+    /* Static TX is buffered until its numbered virtual slot boundary. */
+    qtest_writel(global_qtest, 0xF441E000, 1);
+    qtest_writel(global_qtest, 0xF441C128, 2);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D12c), ==, 0);
+    qtest_clock_step(global_qtest, 1000);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D12c), !=, 0);
+    qtest_writel(global_qtest, 0xF441D0F4, 0xffffffff);
+    qtest_writel(global_qtest, 0xF441D0F0, 0xffffffff);
     qtest_writel(global_qtest, 0xF441E000, 101);
     qtest_writel(global_qtest, 0xF441C128, 2); /* unlock */
     qtest_writel(global_qtest, 0xF441C128, 1); /* commit */
