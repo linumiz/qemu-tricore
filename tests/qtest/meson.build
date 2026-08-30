@@ -34,6 +34,7 @@ qtests_generic = [
 
 qtests_tricore = [ 'tricore-can-transport', 'tricore-can-transport-api',
   'tricore-ici-multicore' ]
+qtests_tricore += [ 'tricore-dma-acceptance' ]
 if enable_modules
   qtests_generic += [ 'modules-test' ]
 endif
