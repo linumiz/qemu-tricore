@@ -86,6 +86,7 @@ enum {
 
 #define ASCLIN_R_MAX 27
 #define ASCLIN_RX_BUFFER 8192
+#define ASCLIN_RX_FIFO_MASK (ASCLIN_HW_FIFO_DEPTH - 1)
 
 #define TYPE_TRICORE_ASCLIN "tricore_asclin"
 #define TRICORE_ASCLIN(obj) \

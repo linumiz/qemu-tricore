@@ -56,6 +56,8 @@ enum {
     BLOCK_TXDATA_BUF = 25,   /* 0x64/4: custom QEMU xfer buf phys addr */
 };
 
+static void asclin_uart_update_parameters(TriCoreASCLINState *s);
+
 /* TC4x register offsets (stride differs completely from TC3x) */
 #define TC4X_IOCR          0x100
 #define TC4X_TXFIFOCON     0x104
@@ -239,6 +241,9 @@ static uint32_t asclin_rxdata_read(TriCoreASCLINState *s, bool peek)
     r = s->rxbuf[s->rxbufreadidx];
     if (!peek) {
         s->rxbufreadidx = (s->rxbufreadidx + 1) % ASCLIN_RX_BUFFER;
+        if (s->rxbufreadidx == s->rxbufwriteidx) {
+            qatomic_and(&s->regs[FLAGS], ~MASK_FLAGS_RFL);
+        }
     }
     return r;
 }
@@ -492,6 +497,14 @@ static void uart_write(void *opaque, hwaddr offset, uint64_t value,
             offset);
         break;
     }
+
+    /* Keep the host chardev framing synchronized with guest configuration. */
+    if (reg_addr == BITCON || reg_addr == BRG || reg_addr == FRAMECON ||
+        reg_addr == DATCON || reg_addr == TC4X_BITCON / 4 ||
+        reg_addr == TC4X_BRG / 4 || reg_addr == TC4X_FRAMECON / 4 ||
+        reg_addr == TC4X_DATCON / 4) {
+        asclin_uart_update_parameters(s);
+    }
 }
 
 static const MemoryRegionOps asclin_uart_mmio_ops = {
@@ -560,11 +573,32 @@ static void asclin_uart_reset(DeviceState *d)
 static void asclin_uart_update_parameters(TriCoreASCLINState *s)
 {
     QEMUSerialSetParams ssp;
+    uint32_t bitcon = s->regs[BITCON];
+    uint32_t brg = s->regs[BRG];
+    uint32_t framecon = s->regs[FRAMECON];
+    uint32_t prescaler = (bitcon & 0xfff) + 1;
+    uint32_t oversampling = ((bitcon >> 16) & 0xf) + 1;
+    uint32_t denominator = brg & 0xfff;
+    uint32_t numerator = (brg >> 16) & 0xfff;
+    uint32_t baudrate = 115200;
 
-    ssp.speed = 921600;
-    ssp.data_bits = 8;
-    ssp.parity = 'N';
-    ssp.stop_bits = 1;
+    /* The TC2x/TC3x iLLD derives baud from a 100 MHz peripheral clock. */
+    if (denominator != 0 && numerator != 0) {
+        uint64_t rate = 100000000ULL * numerator;
+        rate /= denominator * prescaler * oversampling;
+        if (rate != 0 && rate <= UINT32_MAX) {
+            baudrate = rate;
+        }
+    }
+
+    ssp.speed = baudrate;
+    ssp.data_bits = (s->regs[DATCON] & 0xf) + 1;
+    if (ssp.data_bits < 5 || ssp.data_bits > 8) {
+        ssp.data_bits = 8;
+    }
+    ssp.parity = (framecon & (1u << 30)) ?
+                 ((framecon & (1u << 31)) ? 'O' : 'E') : 'N';
+    ssp.stop_bits = ((framecon >> 9) & 0x7) ? 2 : 1;
     qemu_chr_fe_ioctl(&s->chr, CHR_IOCTL_SERIAL_SET_PARAMS, &ssp);
 }
 
@@ -611,6 +645,10 @@ static const VMStateDescription vmstate_asclin_uart = {
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
         VMSTATE_UINT32_ARRAY(regs, TriCoreASCLINState, ASCLIN_R_MAX),
+        VMSTATE_UINT32(txbuf, TriCoreASCLINState),
+        VMSTATE_UINT8_ARRAY(rxbuf, TriCoreASCLINState, ASCLIN_RX_BUFFER),
+        VMSTATE_UINT32(rxbufwriteidx, TriCoreASCLINState),
+        VMSTATE_UINT32(rxbufreadidx, TriCoreASCLINState),
         VMSTATE_END_OF_LIST()
     },
     .post_load = asclin_uart_post_load,
