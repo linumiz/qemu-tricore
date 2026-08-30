@@ -110,6 +110,30 @@ static void eray_schedule(TriCoreERAYState *s);
 static void eray_deliver_frame(TriCoreERAYState *s, uint32_t frame_id,
                                const uint8_t *frame);
 
+static bool eray_dynamic_collision(TriCoreERAYState *s, uint32_t frame_id,
+                                   uint32_t due_cycle, uint32_t due_slot)
+{
+    TriCoreERAYState *peer;
+
+    /* Dynamic slots use deterministic collision avoidance in the portable
+     * bus.  If two nodes request the same cycle/minislot, the lower public
+     * frame ID wins and the loser gets a slot-error event. */
+    QTAILQ_FOREACH(peer, &eray_bus, bus_node) {
+        if (peer == s || !peer->tx_pending ||
+            peer->tx_due_cycle != due_cycle || peer->tx_due_slot != due_slot) {
+            continue;
+        }
+        if (peer->tx_frame_id <= frame_id) {
+            return false;
+        }
+        peer->tx_pending = false;
+        peer->shadow_busy = 0;
+        peer->ccev |= CCEV_SLOT_ERROR;
+        eray_update_irq(peer);
+    }
+    return true;
+}
+
 static void eray_scheduler_cb(void *opaque)
 {
     TriCoreERAYState *s = opaque;
@@ -266,9 +290,17 @@ static void eray_commit_message(TriCoreERAYState *s)
     if (s->sched_cfg & 1) {
         /* With scheduling enabled, commit is a host/shadow-buffer request;
          * transmission occurs at the next configured virtual slot. */
+        uint32_t due_cycle = (s->cycle + 1) % MAX(1u, s->cycle_length);
+        if (frame_id >= s->dynamic_start &&
+            !eray_dynamic_collision(s, frame_id, due_cycle, s->tx_due_slot)) {
+            s->ccev |= CCEV_SLOT_ERROR;
+            s->host_busy = 0;
+            eray_update_irq(s);
+            return;
+        }
         memcpy(s->tx_frame, &s->msg_data[offset], sizeof(s->tx_frame));
         s->tx_frame_id = frame_id;
-        s->tx_due_cycle = (s->cycle + 1) % MAX(1u, s->cycle_length);
+        s->tx_due_cycle = due_cycle;
         s->tx_payload_len = payload_len;
         s->tx_pending = true;
         s->mbsc1 |= BIT(s->mbid & 31);
