@@ -102,18 +102,21 @@ static ssize_t tricore_mcan_receive(CanBusClientState *client,
     if (!frames_cnt) {
         return 0;
     }
-    if (s->rx_fifo_count == ARRAY_SIZE(s->rx_fifo)) {
-        s->regs[R_STATUS / 4] |= R_STATUS_RX_OVERRUN_MASK;
-        tricore_mcan_update_irq(s);
-        return 0;
-    }
     unsigned object = 0;
-    while (object < MCAN_OBJECTS && ((frames[0].can_id ^
+    while (object < MCAN_OBJECTS &&
+           (!s->object_valid[object] || ((frames[0].can_id ^
              s->regs[MO_REG(object, R_MO0_AR) / 4]) &
-            ~s->regs[MO_REG(object, R_MO0_AMR) / 4]) != 0) {
+            ~s->regs[MO_REG(object, R_MO0_AMR) / 4]) != 0)) {
         object++;
     }
     if (object == MCAN_OBJECTS) {
+        return 0;
+    }
+    if (s->rx_fifo_count == ARRAY_SIZE(s->rx_fifo)) {
+        /* Hardware reports overrun only after an accepted frame has no FIFO
+         * slot; filtered traffic must not consume or overflow the FIFO. */
+        s->regs[R_STATUS / 4] |= R_STATUS_RX_OVERRUN_MASK;
+        tricore_mcan_update_irq(s);
         return 0;
     }
     s->rx_fifo[s->rx_fifo_tail] = frames[0];
@@ -125,7 +128,6 @@ static ssize_t tricore_mcan_receive(CanBusClientState *client,
     s->regs[R_RXID / 4] = s->rx_frame.can_id;
     s->regs[R_RXDATAL / 4] = ldl_le_p(&s->rx_frame.data[0]);
     s->regs[R_RXDATAH / 4] = ldl_le_p(&s->rx_frame.data[4]);
-    s->regs[MO_REG(object, R_MO0_AR) / 4] = s->rx_frame.can_id;
     s->regs[MO_REG(object, R_MO0_DATAL) / 4] = s->regs[R_RXDATAL / 4];
     s->regs[MO_REG(object, R_MO0_DATAH) / 4] = s->regs[R_RXDATAH / 4];
     s->rx_object = object;
