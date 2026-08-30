@@ -38,6 +38,7 @@
 #include "hw/dma/tricore_dma.h"
 #include "hw/gpio/tricore_port.h"
 #include "hw/intc/tricore_ici.h"
+#include "hw/misc/tricore_gate.h"
 #include "hw/tricore/tc_soc.h"
 
 #define TYPE_TC39XB_SOC ("tc39xb-soc")
@@ -127,6 +128,7 @@ typedef struct TC39XBSoCState {
     TriCoreDMAState *dma;
     TriCorePortState *port;
     TriCoreICIState *ici;
+    TriCoreGateState *gate;
     CanBusState *canbus;
 
     qemu_irq irq[256];

@@ -242,6 +242,10 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
     for (unsigned i = 0; i < 6; i++)
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->ici), i,
             qdev_get_gpio_in_named(DEVICE(&s->ir), "irq", 720 + i));
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->gate), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->gate), 0, 0xF000B400);
 }
 
 static void tc4dx_soc_init(Object *obj)
@@ -272,6 +276,7 @@ static void tc4dx_soc_init(Object *obj)
     object_initialize_child(obj, "dma", &s->dma, TYPE_TRICORE_DMA);
     object_initialize_child(obj, "port", &s->port, TYPE_TRICORE_PORT);
     object_initialize_child(obj, "ici", &s->ici, TYPE_TRICORE_ICI);
+    object_initialize_child(obj, "gate", &s->gate, TYPE_TRICORE_GATE);
     for (unsigned i = 0; i < 2; i++) {
         char *name = g_strdup_printf("eray%u", i);
         object_initialize_child(obj, name, &s->eray[i], TYPE_TRICORE_ERAY);

@@ -38,6 +38,7 @@
 #include "hw/dma/tricore_dma.h"
 #include "hw/gpio/tricore_port.h"
 #include "hw/intc/tricore_ici.h"
+#include "hw/misc/tricore_gate.h"
 #include "hw/tricore/tc_soc.h"
 
 #define TYPE_TC27XD_SOC ("tc27xd-soc")
@@ -108,6 +109,7 @@ typedef struct TC27XDSoCState {
     TriCoreDMAState *dma;
     TriCorePortState *port;
     TriCoreICIState *ici;
+    TriCoreGateState *gate;
     CanBusState *canbus;
     TriCoreSFRState *sfr;
 

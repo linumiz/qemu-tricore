@@ -513,6 +513,9 @@ static void tc39x_soc_realize(DeviceState *dev_soc, Error **errp)
     for (unsigned i = 0; i < 6; i++)
         sysbus_connect_irq(SYS_BUS_DEVICE(s->ici), i,
             qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", 208 + i));
+    s->gate = TRICORE_GATE(object_new(TYPE_TRICORE_GATE));
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(s->gate), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(s->gate), 0, 0xF003B400);
     memory_region_add_subregion(sysmem, 0xF001D000, &s->eth->iomem);
     sysbus_connect_irq(SYS_BUS_DEVICE(s->eth), 0,
         qdev_get_gpio_in_named(DEVICE(s->irbus), "irq", 175));

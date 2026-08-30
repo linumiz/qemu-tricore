@@ -25,6 +25,7 @@
 #include "hw/dma/tricore_dma.h"
 #include "hw/gpio/tricore_port.h"
 #include "hw/intc/tricore_ici.h"
+#include "hw/misc/tricore_gate.h"
 #include "hw/net/tricore_eth.h"
 #include "hw/tricore/tc_soc.h"
 
@@ -51,6 +52,7 @@ typedef struct TC4DXSoCState {
     TriCoreDMAState dma;
     TriCorePortState port;
     TriCoreICIState ici;
+    TriCoreGateState gate;
     CanBusState *canbus;
     MemoryRegion cre_region;
     uint32_t cre_control;
