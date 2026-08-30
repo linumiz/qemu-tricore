@@ -137,6 +137,8 @@ static void asclin_lin_timeout_expire(void *opaque)
 
 static void asclin_lin_timeout_start(TriCoreASCLINState *s, bool response)
 {
+    /* DATCON.DATLEN is the bits-per-byte setting, not the LIN slot length.
+     * Slot length is supplied by the LIN schedule/iLLD PDU. */
     uint32_t threshold = response ? ((s->regs[DATCON] >> 16) & 0xff) :
                                     (s->regs[LINHTIMER] & 0xff);
     uint32_t prescaler = (s->regs[BITCON] & 0xfff) + 1;
