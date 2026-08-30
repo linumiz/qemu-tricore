@@ -26,10 +26,14 @@
 static void irq_evaluate(void *opaque)
 {
     TriCoreIRState *pv = opaque;
-    uint16_t tos_irq[8] = { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
-                            0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF };
-    uint8_t tos_priority[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-    uint8_t tos_vm[8] = { 0 };
+    uint16_t tos_irq[16];
+    uint8_t tos_priority[16] = { 0 };
+    uint8_t tos_vm[16] = { 0 };
+    uint8_t tos_cs[16] = { 0 };
+
+    for (unsigned i = 0; i < ARRAY_SIZE(tos_irq); i++) {
+        tos_irq[i] = 0xFFFF;
+    }
 
     for (uint32_t srcnum = 0; srcnum < pv->num_irqs; srcnum++) {
         uint32_t src_reg = pv->src_regs[srcnum];
@@ -56,6 +60,8 @@ static void irq_evaluate(void *opaque)
                 tos_priority[tos] = priority;
                 tos_irq[tos] = srcnum;
                 tos_vm[tos] = FIELD_EX32(src_reg, SRC, VM);
+                tos_cs[tos] = pv->tc4x_mode ?
+                    FIELD_EX32(src_reg, SRC_TC4X, CS) : 0;
             }
         }
     }
@@ -64,11 +70,13 @@ static void irq_evaluate(void *opaque)
     for (tos_idx = 0; tos_idx < pv->num_isps; tos_idx++) {
         if (tos_irq[tos_idx] == 0xFFFF) {
             pv->lwsr[tos_idx] = 0;
+            pv->tos_cs[tos_idx] = 0;
             if (qemu_loglevel_mask(CPU_LOG_INT)) {
                 qemu_log("tricore_ir: lower TOS %d irq line\n", tos_idx);
             }
             qemu_irq_lower(pv->isp_irqs[tos_idx]);
         } else {
+            pv->tos_cs[tos_idx] = tos_cs[tos_idx];
             pv->lwsr[tos_idx] = FIELD_DP32(0, LWSR, STAT, 1) |
                                 FIELD_DP32(0, LWSR, ID, tos_irq[tos_idx]) |
                                 FIELD_DP32(0, LWSR, VALID, 1) |
@@ -76,6 +84,8 @@ static void irq_evaluate(void *opaque)
             if (pv->tc4x_mode) {
                 pv->lwsr[tos_idx] = FIELD_DP32(pv->lwsr[tos_idx], LWSR, VM,
                                                tos_vm[tos_idx]);
+                pv->lwsr[tos_idx] = FIELD_DP32(pv->lwsr[tos_idx], LWSR, CS,
+                                               tos_cs[tos_idx]);
                 pv->lasr = FIELD_DP32(pv->lasr, LASR, ID, tos_irq[tos_idx]);
                 pv->lasr = FIELD_DP32(pv->lasr, LASR, VM, tos_vm[tos_idx]);
             }
@@ -141,6 +151,16 @@ static uint64_t tricore_ir_src_regs_read(void *opaque, hwaddr offset,
     TriCoreIRState *s = (TriCoreIRState *)opaque;
     hwaddr srcnum = offset >> 2;
 
+    if (s->tc27x_mode) {
+        static const uint16_t tc27x_src_map[] = {
+            [0x080 / 4] = 9, [0x084 / 4] = 10, [0x088 / 4] = 11,
+            [0x490 / 4] = 103,
+        };
+        if (srcnum < ARRAY_SIZE(tc27x_src_map) && tc27x_src_map[srcnum]) {
+            srcnum = tc27x_src_map[srcnum];
+        }
+    }
+
     if (srcnum < s->num_irqs) {
         return s->src_regs[srcnum];
     }
@@ -153,6 +173,16 @@ static void tricore_ir_src_regs_write(void *opaque, hwaddr offset,
 {
     TriCoreIRState *s = (TriCoreIRState *)opaque;
     hwaddr srcnum = offset >> 2;
+
+    if (s->tc27x_mode) {
+        static const uint16_t tc27x_src_map[] = {
+            [0x080 / 4] = 9, [0x084 / 4] = 10, [0x088 / 4] = 11,
+            [0x490 / 4] = 103,
+        };
+        if (srcnum < ARRAY_SIZE(tc27x_src_map) && tc27x_src_map[srcnum]) {
+            srcnum = tc27x_src_map[srcnum];
+        }
+    }
 
     if (srcnum >= s->num_irqs) {
         if (qemu_loglevel_mask(CPU_LOG_INT)) {
@@ -291,6 +321,10 @@ static void tricore_ir_realize(DeviceState *dev, Error **errp)
                    ARRAY_SIZE(pv->lwsr));
         return;
     }
+    if (pv->num_cpu_isps > pv->num_isps) {
+        error_setg(errp, "tricore_ir: num-cpu-isps cannot exceed num-isps");
+        return;
+    }
     if (pv->num_irqs == 0 || pv->num_irqs > 0x1000) {
         error_setg(errp, "tricore_ir: num-irqs must be between 1 and 4096");
         return;
@@ -307,8 +341,23 @@ static void tricore_ir_realize(DeviceState *dev, Error **errp)
 
 static const Property tricore_ir_properties[] = {
     DEFINE_PROP_BOOL("tc4x-mode", TriCoreIRState, tc4x_mode, false),
+    DEFINE_PROP_BOOL("tc27x-mode", TriCoreIRState, tc27x_mode, false),
+    DEFINE_PROP_UINT8("num-cpu-isps", TriCoreIRState, num_cpu_isps, 0),
     DEFINE_PROP_UINT8("num-isps", TriCoreIRState, num_isps, 1),
     DEFINE_PROP_UINT16("num-irqs", TriCoreIRState, num_irqs, 256),
+};
+
+static const VMStateDescription vmstate_tricore_ir = {
+    .name = "tricore-ir",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT32_ARRAY(lwsr, TriCoreIRState, 16),
+        VMSTATE_UINT32(lasr, TriCoreIRState),
+        VMSTATE_UINT8_ARRAY(tos_cs, TriCoreIRState, 16),
+        VMSTATE_UINT8(num_cpu_isps, TriCoreIRState),
+        VMSTATE_END_OF_LIST()
+    }
 };
 
 static void tricore_ir_class_init(ObjectClass *klass, const void *data)
@@ -317,6 +366,7 @@ static void tricore_ir_class_init(ObjectClass *klass, const void *data)
 
     dc->user_creatable = false;
     dc->realize = tricore_ir_realize;
+    dc->vmsd = &vmstate_tricore_ir;
     device_class_set_props(dc, tricore_ir_properties);
 }
 

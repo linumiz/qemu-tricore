@@ -90,6 +90,13 @@ static const MemoryRegionOps tc27x_pmcsr_ops = {
     .valid.max_access_size = 4,
 };
 
+static void tc27x_dma_isp_sink(void *opaque, int n, int level)
+{
+    /* TC277 exposes a fourth service-provider slot for DMA.  No DMA device
+     * is present yet, but keeping the slot connected prevents it from being
+     * confused with a CPU ISP and preserves the documented topology. */
+}
+
 const MemmapEntry tc27xd_soc_memmap[] = {
     [TC27XD_DSPR2]     = { 0x50000000,            120 * KiB },
     [TC27XD_DCACHE2]   = { 0x5001E000,              8 * KiB },
@@ -231,10 +238,10 @@ static void tc27xd_soc_init_memory_mapping(DeviceState *dev_soc)
 }
 
 /* TC277 SRC offsets from MODULE_SRC (F0038000), converted to SRN indices. */
-#define TC27X_SRC_STM0_SR0      (0x490 / 4) /* F0038490 */
-#define TC27X_SRC_ASCLIN0_TX    (0x080 / 4) /* F0038080 */
-#define TC27X_SRC_ASCLIN0_RX    (0x084 / 4) /* F0038084 */
-#define TC27X_SRC_ASCLIN0_ERR   (0x088 / 4) /* F0038088 */
+#define TC27X_SRC_STM0_SR0      103 /* F0038490 */
+#define TC27X_SRC_ASCLIN0_TX    9   /* F0038080 */
+#define TC27X_SRC_ASCLIN0_RX    10  /* F0038084 */
+#define TC27X_SRC_ASCLIN0_ERR   11  /* F0038088 */
 
 /* Reserved TC277 SRC nodes for later peripheral models. */
 #define TC27X_SRC_ETH           175
@@ -262,7 +269,9 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     object_property_add_child(OBJECT(dev_soc), "sfr", OBJECT(s->sfr));
 
     qdev_prop_set_bit(DEVICE(s->irbus), "tc4x-mode", false);
+    qdev_prop_set_bit(DEVICE(s->irbus), "tc27x-mode", true);
     qdev_prop_set_uint8(DEVICE(s->irbus), "num-isps", sc->ir_num_isps);
+    qdev_prop_set_uint8(DEVICE(s->irbus), "num-cpu-isps", sc->num_cpus);
     qdev_prop_set_uint16(DEVICE(s->irbus), "num-irqs", 512);
 
     for (unsigned i = 0; i < sc->num_cpus; i++) {
@@ -302,6 +311,10 @@ static void tc27xd_soc_realize(DeviceState *dev_soc, Error **errp)
     for (unsigned i = 0; i < sc->num_cpus; i++) {
         qdev_connect_gpio_out_named(DEVICE(s->irbus), "isp", i,
             qdev_get_gpio_in_named(DEVICE(&s->cpus[i]), "tricore.irq", 0));
+    }
+    if (sc->ir_num_isps > sc->num_cpus) {
+        qdev_connect_gpio_out_named(DEVICE(s->irbus), "isp", sc->num_cpus,
+            qemu_allocate_irq(tc27x_dma_isp_sink, s, 0));
     }
 
     /* TC27D CPU register windows: F881/F883/F8850000. */
@@ -380,7 +393,7 @@ static void tc277d_soc_class_init(ObjectClass *oc, const void *data)
     sc->cpu_type     = TRICORE_CPU_TYPE_NAME("tc2x");
     sc->memmap       = tc27xd_soc_memmap;
     sc->num_cpus     = 3;
-    sc->ir_num_isps  = 3;
+    sc->ir_num_isps  = 4;
     sc->dspr_size[0] = 112 * KiB;
     sc->dspr_size[1] = 120 * KiB;
     sc->dspr_size[2] = 120 * KiB;

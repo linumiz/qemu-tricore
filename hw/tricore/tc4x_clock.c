@@ -14,6 +14,7 @@
 #include "hw/core/registerfields.h"
 #include "hw/core/sysbus.h"
 #include "hw/tricore/tc4x_clock.h"
+#include "migration/vmstate.h"
 #include "qapi/error.h"
 #include "qemu/log.h"
 
@@ -353,6 +354,44 @@ static void tc4x_clock_realize(DeviceState *dev, Error **errp)
     tc4x_clock_update_perccu(s);
 }
 
+static int tc4x_clock_post_load(void *opaque, int version_id)
+{
+    TC4xClockState *s = opaque;
+    tc4x_clock_update_freq(s);
+    tc4x_clock_update_sysccu(s);
+    tc4x_clock_update_perccu(s);
+    return 0;
+}
+
+static const VMStateDescription vmstate_tc4x_clock = {
+    .name = "tc4x-clock",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .post_load = tc4x_clock_post_load,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT32(insel, TC4xClockState),
+        VMSTATE_UINT32(clksels, TC4xClockState),
+        VMSTATE_UINT32(clkselp, TC4xClockState),
+        VMSTATE_UINT32(rampfstat, TC4xClockState),
+        VMSTATE_UINT32(OSCCON, TC4xClockState),
+        VMSTATE_UINT32(OSCMON0, TC4xClockState),
+        VMSTATE_UINT32(OSCMON1, TC4xClockState),
+        VMSTATE_UINT32(CCUCON, TC4xClockState),
+        VMSTATE_UINT32(SYSPLLCON0, TC4xClockState),
+        VMSTATE_UINT32(SYSPLLCON1, TC4xClockState),
+        VMSTATE_UINT32(SYSPLLCON2, TC4xClockState),
+        VMSTATE_UINT32(PERPLLCON0, TC4xClockState),
+        VMSTATE_UINT32(PERPLLCON1, TC4xClockState),
+        VMSTATE_UINT32(PERPLLCON2, TC4xClockState),
+        VMSTATE_UINT32(RAMPCON0, TC4xClockState),
+        VMSTATE_UINT32(SYSCCUCON0, TC4xClockState),
+        VMSTATE_UINT32(SYSCCUCON1, TC4xClockState),
+        VMSTATE_UINT32(PERCCUCON0, TC4xClockState),
+        VMSTATE_UINT32(PERCCUCON1, TC4xClockState),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static void tc4x_clock_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
@@ -360,6 +399,7 @@ static void tc4x_clock_class_init(ObjectClass *klass, const void *data)
 
     rc->phases.hold = tc4x_clock_reset;
     dc->realize = tc4x_clock_realize;
+    dc->vmsd = &vmstate_tc4x_clock;
 }
 
 static const TypeInfo tc4x_clock_info = {
