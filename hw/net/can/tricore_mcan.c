@@ -217,8 +217,13 @@ static uint64_t tricore_mcan_read(void *opaque, hwaddr addr, unsigned size)
         unsigned list = (addr - LIST_BASE) / 4;
         unsigned begin = list * (MCAN_OBJECTS / LIST_COUNT);
         unsigned size = MCAN_OBJECTS / LIST_COUNT;
+        bool empty = true;
+        for (unsigned i = begin; i < begin + size; i++) {
+            empty &= !s->object_valid[i];
+        }
         /* LIST fields are read-only hardware status in MultiCAN+. */
-        return begin | ((begin + size - 1) << 8) | (size << 16);
+        return begin | ((begin + size - 1) << 8) | (size << 16) |
+               (empty ? BIT(24) : 0);
     }
     if (addr >= 0x80 && addr < 0xc0 && (addr & 3) == 0) {
         return ldl_le_p(&s->rx_data[addr - 0x80]);
@@ -267,6 +272,10 @@ static void tricore_mcan_write(void *opaque, hwaddr addr, uint64_t value,
                (addr >= R_MO0_DATAH && addr < R_MO0_DATAH + MCAN_OBJECTS * MO_STRIDE &&
                 ((addr - R_MO0_DATAH) % MO_STRIDE) == 0)) {
         s->regs[index] = value;
+        if (addr >= R_MO0_AR && addr < R_MO0_AR + MCAN_OBJECTS * MO_STRIDE &&
+            ((addr - R_MO0_AR) % MO_STRIDE) == 0) {
+            s->object_valid[(addr - R_MO0_AR) / MO_STRIDE] = true;
+        }
     } else if (addr == R_TXCTRL && (value & 1)) {
         tricore_mcan_send(s);
     } else if (addr >= R_MO0_CTR && addr < R_MO0_CTR + MCAN_OBJECTS * MO_STRIDE &&
@@ -347,6 +356,7 @@ static const VMStateDescription vmstate_tricore_mcan = {
         VMSTATE_BOOL(rx_pending, TriCoreMCANState),
         VMSTATE_UINT8(enabled_nodes, TriCoreMCANState),
         VMSTATE_UINT8(selected_node, TriCoreMCANState),
+        VMSTATE_BOOL_ARRAY(object_valid, TriCoreMCANState, MCAN_OBJECTS),
         VMSTATE_BUFFER_UNSAFE_INFO(rx_fifo, TriCoreMCANState, 1,
                                    vmstate_info_buffer,
                                    sizeof(((TriCoreMCANState *)0)->rx_fifo)),
