@@ -130,7 +130,8 @@ static bool eray_dynamic_collision(TriCoreERAYState *s, uint32_t frame_id,
     QTAILQ_FOREACH(peer, &eray_bus, bus_node) {
         /* Only active FlexRay nodes participate in dynamic arbitration;
          * a stopped migration destination must not collide with the source. */
-        if (peer == s || peer->ccsv != POC_NORMAL_ACTIVE || !peer->tx_pending ||
+        if (peer == s || peer->ccsv != POC_NORMAL_ACTIVE ||
+            !(peer->sched_cfg & 1) || !peer->tx_pending ||
             peer->tx_due_cycle != due_cycle || peer->tx_due_slot != due_slot) {
             continue;
         }
