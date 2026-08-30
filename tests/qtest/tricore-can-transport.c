@@ -24,6 +24,8 @@ static void test_tc4d7_can_machine(void)
                 "-machine KIT_A3G_TC4D7_LITE,canbus=canbus");
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF4710000), ==, 0);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF4790000), ==, 0);
+    qtest_writel(global_qtest, 0xF4700000, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF4700004), ==, 1);
     qtest_quit(global_qtest);
 }
 

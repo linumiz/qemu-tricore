@@ -21,6 +21,31 @@
 #include "hw/tricore/triboard.h"
 #include "qom/object.h"
 
+static uint64_t tc4dx_cre_read(void *opaque, hwaddr offset, unsigned size)
+{
+    TC4DXSoCState *s = opaque;
+    return offset == 0 ? s->cre_control :
+           offset == 4 ? s->cre_status : 0;
+}
+
+static void tc4dx_cre_write(void *opaque, hwaddr offset, uint64_t value,
+                            unsigned size)
+{
+    TC4DXSoCState *s = opaque;
+    if (offset == 0) {
+        s->cre_control = value;
+        s->cre_status = value ? 1 : 0;
+    } else if (offset == 4) {
+        s->cre_status &= ~value;
+    }
+}
+
+static const MemoryRegionOps tc4dx_cre_ops = {
+    .read = tc4dx_cre_read, .write = tc4dx_cre_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid.min_access_size = 4, .valid.max_access_size = 4,
+};
+
 static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
 {
     TC4DXSoCState *s = TC4DX_SOC(dev_soc);
@@ -28,6 +53,12 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
     SysBusDevice *busdev;
     MemoryRegion *system_memory = get_system_memory();
     int i;
+
+    /* Minimal TC4x CRE control/status block.  Routing itself is represented
+     * by the per-channel SRC/DRE IRQ wiring below. */
+    memory_region_init_io(&s->cre_region, OBJECT(s), &tc4dx_cre_ops, s,
+                          "tc4x-cre", 0x1000);
+    memory_region_add_subregion(system_memory, 0xF4700000, &s->cre_region);
 
     if (!clock_has_source(s->fosc)) {
         error_setg(errp, "osc clock must be wired up by the board code");
