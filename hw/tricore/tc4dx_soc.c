@@ -26,7 +26,8 @@
 #define TC4DX_SRC_ERAY0_INT1 721
 #define TC4DX_SRC_ERAY1_INT0 722
 #define TC4DX_SRC_ERAY1_INT1 723
-/* Generation-specific ERAY service-request table from public TC4x sources. */
+/* Generation-specific ERAY service-request table from the public TC4x
+ * User Manual / IfxEray headers. */
 static const uint16_t tc4dx_eray_src[2][2] = {
     { TC4DX_SRC_ERAY0_INT0, TC4DX_SRC_ERAY0_INT1 },
     { TC4DX_SRC_ERAY1_INT0, TC4DX_SRC_ERAY1_INT1 },

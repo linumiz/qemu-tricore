@@ -306,7 +306,8 @@ static void tc39x_soc_init_memory_mapping(DeviceState *dev_soc)
 #define TC3X_SRC_ERAY0_INT1     161
 #define TC3X_SRC_ERAY1_INT0     162
 #define TC3X_SRC_ERAY1_INT1     163
-/* Generation-specific ERAY service-request table from public TC3x sources. */
+/* Generation-specific ERAY service-request table from the public TC3x
+ * User Manual / IfxEray headers. */
 static const uint16_t tc3x_eray_src[2][2] = {
     { TC3X_SRC_ERAY0_INT0, TC3X_SRC_ERAY0_INT1 },
     { TC3X_SRC_ERAY1_INT0, TC3X_SRC_ERAY1_INT1 },

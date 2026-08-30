@@ -253,7 +253,7 @@ static void tc27xd_soc_init_memory_mapping(DeviceState *dev_soc)
 #define TC27X_SRC_ERAY0_INT0    160
 #define TC27X_SRC_ERAY0_INT1    161
 /* Generation-specific ERAY service-request table from the public TC27x
- * interrupt-router documentation; indexes are [instance][INT0/INT1]. */
+ * User Manual / IfxEray headers; indexes are [instance][INT0/INT1]. */
 static const uint16_t tc27x_eray_src[1][2] = {
     { TC27X_SRC_ERAY0_INT0, TC27X_SRC_ERAY0_INT1 },
 };
