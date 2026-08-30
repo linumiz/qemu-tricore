@@ -117,16 +117,21 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
             qdev_get_gpio_in_named(DEVICE(&s->ir), "irq", 174 + i * 3));
     }
 
-    /* TC4Dx MCMCAN0 control window (the message RAM remains device-local). */
-    dev = DEVICE(&s->mcan);
-    if (s->canbus) {
-        object_property_set_link(OBJECT(dev), "canbus", OBJECT(s->canbus),
-                                 &error_abort);
+    /* TC4Dx MCMCAN control windows; each channel has private message state. */
+    static const hwaddr mcan_base[TC4DX_MAX_MCAN] = {
+        0xF4710000, 0xF4730000, 0xF4750000, 0xF4770000, 0xF4790000,
+    };
+    for (i = 0; i < TC4DX_MAX_MCAN; i++) {
+        dev = DEVICE(&s->mcan[i]);
+        if (s->canbus) {
+            object_property_set_link(OBJECT(dev), "canbus",
+                                     OBJECT(s->canbus), &error_abort);
+        }
+        if (!sysbus_realize(SYS_BUS_DEVICE(dev), errp)) {
+            return;
+        }
+        sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, mcan_base[i]);
     }
-    if (!sysbus_realize(SYS_BUS_DEVICE(dev), errp)) {
-        return;
-    }
-    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, 0xF4710000);
 }
 
 static void tc4dx_soc_init(Object *obj)
@@ -145,7 +150,11 @@ static void tc4dx_soc_init(Object *obj)
         object_initialize_child(obj, name, &s->asclin[i], TYPE_TRICORE_ASCLIN);
         g_free(name);
     }
-    object_initialize_child(obj, "mcan0", &s->mcan, TYPE_TRICORE_MCAN);
+    for (unsigned i = 0; i < TC4DX_MAX_MCAN; i++) {
+        char *name = g_strdup_printf("mcan%u", i);
+        object_initialize_child(obj, name, &s->mcan[i], TYPE_TRICORE_MCAN);
+        g_free(name);
+    }
 
     s->fosc = qdev_init_clock_in(DEVICE(s), "fosc", NULL, NULL, 0);
 }

@@ -26,6 +26,7 @@
 #define TYPE_TC4DX_SOC ("tc4dx-soc")
 #define TC4DX_MAX_CPUS 6
 #define TC4DX_MAX_ASCLIN 28
+#define TC4DX_MAX_MCAN 5
 OBJECT_DECLARE_TYPE(TC4DXSoCState, TC4DXSoCClass, TC4DX_SOC)
 
 
@@ -38,7 +39,7 @@ typedef struct TC4DXSoCState {
     TriCoreIRState ir;
     TC4xClockState clock;
     TriCoreASCLINState asclin[TC4DX_MAX_ASCLIN];
-    TriCoreMCANState mcan;
+    TriCoreMCANState mcan[TC4DX_MAX_MCAN];
     CanBusState *canbus;
 
     Clock *fosc;
