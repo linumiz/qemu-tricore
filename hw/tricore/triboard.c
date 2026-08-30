@@ -91,6 +91,7 @@ static void tc277_load_multicore_kernel(TC27XDSoCState *soc,
 
 static void triboard_machine_tc4d7_init(MachineState *machine)
 {
+    TriBoardMachineState *ms = TRIBOARD_MACHINE(machine);
     DeviceState *dev;
     Clock *fosc;
 
@@ -101,6 +102,10 @@ static void triboard_machine_tc4d7_init(MachineState *machine)
     dev = qdev_new("tc4d7-soc");
     object_property_add_child(OBJECT(machine), "soc", OBJECT(dev));
     qdev_connect_clock_in(dev, "fosc", fosc);
+    if (ms->canbus) {
+        object_property_set_link(OBJECT(dev), "canbus",
+                                 OBJECT(ms->canbus), &error_fatal);
+    }
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
 
     if (machine->kernel_filename) {
@@ -241,7 +246,7 @@ static const TypeInfo triboard_machine_types[] = {
     },
     {
         .name = MACHINE_TYPE_NAME("KIT_A3G_TC4D7_LITE"),
-        .parent = TYPE_MACHINE,
+        .parent = TYPE_TRIBOARD_MACHINE,
         .class_init = triboard_machine_tc4d7_class_init,
     },
 };

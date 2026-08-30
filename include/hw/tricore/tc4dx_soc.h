@@ -20,6 +20,7 @@
 #include "hw/intc/tricore_ir.h"
 #include "hw/timer/tricore_stm.h"
 #include "hw/char/tricore_asclin.h"
+#include "hw/net/tricore_mcan.h"
 #include "hw/tricore/tc_soc.h"
 
 #define TYPE_TC4DX_SOC ("tc4dx-soc")
@@ -37,6 +38,8 @@ typedef struct TC4DXSoCState {
     TriCoreIRState ir;
     TC4xClockState clock;
     TriCoreASCLINState asclin[TC4DX_MAX_ASCLIN];
+    TriCoreMCANState mcan;
+    CanBusState *canbus;
 
     Clock *fosc;
 } TC4DXSoCState;

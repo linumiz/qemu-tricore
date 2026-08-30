@@ -116,6 +116,17 @@ static void tc4dx_soc_realize(DeviceState *dev_soc, Error **errp)
             busdev, 2,
             qdev_get_gpio_in_named(DEVICE(&s->ir), "irq", 174 + i * 3));
     }
+
+    /* TC4Dx MCMCAN0 control window (the message RAM remains device-local). */
+    dev = DEVICE(&s->mcan);
+    if (s->canbus) {
+        object_property_set_link(OBJECT(dev), "canbus", OBJECT(s->canbus),
+                                 &error_abort);
+    }
+    if (!sysbus_realize(SYS_BUS_DEVICE(dev), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, 0xF4710000);
 }
 
 static void tc4dx_soc_init(Object *obj)
@@ -134,14 +145,22 @@ static void tc4dx_soc_init(Object *obj)
         object_initialize_child(obj, name, &s->asclin[i], TYPE_TRICORE_ASCLIN);
         g_free(name);
     }
+    object_initialize_child(obj, "mcan0", &s->mcan, TYPE_TRICORE_MCAN);
 
     s->fosc = qdev_init_clock_in(DEVICE(s), "fosc", NULL, NULL, 0);
 }
+
+static Property tc4dx_soc_props[] = {
+    DEFINE_PROP_LINK("canbus", TC4DXSoCState, canbus,
+                     TYPE_CAN_BUS, CanBusState *),
+};
 
 static void tc4dx_soc_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     dc->realize = tc4dx_soc_realize;
+    device_class_set_props_n(dc, tc4dx_soc_props,
+                             ARRAY_SIZE(tc4dx_soc_props));
 }
 
 static void tc4d7_soc_class_init(ObjectClass *oc, const void *data)
