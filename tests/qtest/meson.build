@@ -32,7 +32,7 @@ qtests_generic = [
   'netdev-socket',
 ]
 
-qtests_tricore = [ 'tricore-can-transport' ]
+qtests_tricore = [ 'tricore-can-transport', 'tricore-can-transport-api' ]
 if enable_modules
   qtests_generic += [ 'modules-test' ]
 endif
@@ -405,6 +405,10 @@ qtests = {
   'virtio-net-failover': test_migration_files,
   'vmgenid-test': files('boot-sector.c', 'acpi-utils.c'),
   'netdev-socket': files('netdev-socket.c', '../unit/socket-helpers.c'),
+}
+
+qtests += {
+  'tricore-can-transport-api': [files('../../net/can/can_core.c')]
 }
 
 if vnc.found()
