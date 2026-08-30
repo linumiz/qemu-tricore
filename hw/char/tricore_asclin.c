@@ -183,6 +183,36 @@ static bool asclin_lin_pid_valid(uint8_t pid)
     return ((pid >> 6) & 1) == p0 && ((pid >> 7) & 1) == (p1 ^ 1);
 }
 
+/*
+ * LIN response length is a schedule property, not something encoded in the
+ * PID or DATCON.  QEMU therefore accepts an explicit schedule (pid:length:
+ * checksum, comma separated) so frame boundaries remain deterministic while
+ * preserving the hardware-visible register semantics.
+ */
+static void asclin_lin_schedule_select(TriCoreASCLINState *s, uint8_t pid)
+{
+    g_auto(GStrv) entries = NULL;
+    const char *schedule = s->lin_schedule;
+
+    if (!schedule || !*schedule) {
+        return;
+    }
+    entries = g_strsplit(schedule, ",", -1);
+    for (guint i = 0; entries[i]; i++) {
+        unsigned entry_pid, entry_len;
+        char checksum[16];
+
+        if (sscanf(entries[i], "%x:%u:%15s", &entry_pid, &entry_len,
+                   checksum) == 3 && entry_pid == pid &&
+            entry_len >= 1 && entry_len <= 8) {
+            s->lin_response_length = entry_len;
+            s->lin_checksum_enhanced = g_ascii_strcasecmp(checksum,
+                                                          "enhanced") == 0;
+            return;
+        }
+    }
+}
+
 static void asclin_lin_gateway_emit(TriCoreASCLINState *s, uint8_t byte)
 {
     uint8_t record[2] = { ASCLIN_LIN_GATEWAY_BYTE, byte };
@@ -222,6 +252,7 @@ static void asclin_lin_bus_receive(TriCoreASCLINState *s, uint8_t byte)
         s->lin_pid_seen = false;
     } else if (s->lin_sync_seen && !s->lin_pid_seen) {
         s->lin_pid_seen = true;
+        asclin_lin_schedule_select(s, byte & 0xff);
         asclin_lin_timeout_start(s, true);
         s->lin_data_count = 0;
         s->lin_checksum_sum = (s->regs[LINCON] & (1u << 25) &&
@@ -954,6 +985,7 @@ static const Property asclin_uart_properties[] = {
                       lin_response_length, 8),
     DEFINE_PROP_BOOL("lin-checksum-enhanced", TriCoreASCLINState,
                      lin_checksum_enhanced, true),
+    DEFINE_PROP_STRING("lin-schedule", TriCoreASCLINState, lin_schedule),
 };
 
 static void asclin_uart_class_init(ObjectClass *klass, const void *data)

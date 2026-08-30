@@ -116,6 +116,7 @@ struct TriCoreASCLINState {
     uint16_t lin_checksum_sum;
     uint8_t lin_response_length;
     bool lin_checksum_enhanced;
+    char *lin_schedule;
     ptimer_state *ptimer;
     QEMUTimer *lin_timeout_timer;
     bool lin_timeout_response;
