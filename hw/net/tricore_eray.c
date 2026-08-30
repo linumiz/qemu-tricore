@@ -33,6 +33,13 @@
 #define ERAY_MINISLOT 0x13c
 #define ERAY_GUARDIAN 0x140
 #define ERAY_CHANNEL 0x144
+#define ERAY_SUCC2 0x148
+#define ERAY_SUCC3 0x14c
+#define ERAY_PRTC1 0x150
+#define ERAY_PRTC2 0x154
+#define ERAY_FSR 0x158
+#define ERAY_MRC 0x15c
+#define ERAY_FCL 0x160
 
 #define CCSV_POC_SHIFT 0
 #define CCSV_POC_MASK  0x3f
@@ -45,6 +52,8 @@
 #define CMD_COLDSTART  0x03
 #define CMD_RUN        0x04
 #define CMD_HALT       0x05
+#define CMD_WAKEUP     0x06
+#define CMD_FREEZE     0x07
 #define MBCTRL_COMMIT  BIT(0)
 #define MBCTRL_UNLOCK  BIT(1)
 #define MBCTRL_CHANNEL_B BIT(2)
@@ -88,6 +97,8 @@ static void eray_command(TriCoreERAYState *s, uint32_t cmd)
     case CMD_COLDSTART: s->ccsv = POC_NORMAL_ACTIVE; s->cycle = 0; eray_schedule(s); break;
     case CMD_RUN: s->ccsv = POC_NORMAL_ACTIVE; eray_schedule(s); break;
     case CMD_HALT: s->ccsv = POC_HALT; timer_del(s->scheduler); break;
+    case CMD_WAKEUP: s->ccsv = POC_READY; break;
+    case CMD_FREEZE: s->ccsv = POC_HALT; timer_del(s->scheduler); break;
     default: s->ccev |= BIT(0); break;
     }
     eray_update_irq(s);
@@ -114,12 +125,33 @@ static void eray_commit_message(TriCoreERAYState *s)
     }
     /* Static slots are sent in the configured prefix; remaining frame IDs
      * use the dynamic segment and are represented by the minislot marker. */
-    if (frame_id > s->static_slots) {
+    if (frame_id >= s->dynamic_start) {
         s->slot_status |= BIT(30) | ((s->minislot & 0xff) << 8);
     }
     QTAILQ_FOREACH(peer, &eray_bus, bus_node) {
         if (peer == s || peer->ccsv != POC_NORMAL_ACTIVE) continue;
+        /* The public ERAY channel-selection bits gate reception independently
+         * on A and B; do not deliver a frame to a disconnected channel. */
+        if (!(peer->channel_mask & ((s->mbctrl & MBCTRL_CHANNEL_B) ? 2 : 1))) {
+            continue;
+        }
         uint32_t peer_off = (s->mbid & 0xff) * 64;
+        /* iLLD configures a contiguous receive FIFO by assigning message
+         * buffers from FFB through FCL.  Keep a deterministic head/count in
+         * FSR while retaining the normal NDAT/MBSC indication. */
+        if (peer->fifo_depth) {
+            uint32_t count = (peer->fifo_status >> 8) & 0xff;
+            uint32_t head = peer->fifo_status & 0xff;
+            if (count < peer->fifo_depth) {
+                uint32_t fifo_off = ((peer->fifo_start + head) & 0xff) * 64;
+                memcpy(&peer->msg_data[fifo_off], &s->msg_data[offset], 64);
+                head = (head + 1) % peer->fifo_depth;
+                count++;
+                peer->fifo_status = head | (count << 8);
+            } else {
+                peer->ccev |= BIT(4); /* receive FIFO overrun */
+            }
+        }
         memcpy(&peer->msg_data[peer_off], &s->msg_data[offset], 64);
         peer->ndat1 |= BIT(s->mbid & 31);
         peer->mbsc1 |= BIT(s->mbid & 31);
@@ -152,6 +184,13 @@ static uint64_t eray_read(void *opaque, hwaddr off, unsigned size)
     case ERAY_MINISLOT: return s->minislot;
     case ERAY_GUARDIAN: return s->guardian;
     case ERAY_CHANNEL: return s->channel_mask;
+    case ERAY_SUCC2: return s->succ2;
+    case ERAY_SUCC3: return s->succ3;
+    case ERAY_PRTC1: return s->prtc1;
+    case ERAY_PRTC2: return s->prtc2;
+    case ERAY_FSR: return s->fifo_status;
+    case ERAY_MRC: return s->fifo_start;
+    case ERAY_FCL: return s->fifo_depth;
     default: return 0;
     }
 }
@@ -176,6 +215,12 @@ static void eray_write(void *opaque, hwaddr off, uint64_t value,
     case ERAY_MINISLOT: s->minislot = value & 0xff; break;
     case ERAY_GUARDIAN: s->guardian = value & 1; break;
     case ERAY_CHANNEL: s->channel_mask = value & 3; break;
+    case ERAY_SUCC2: s->succ2 = value; break;
+    case ERAY_SUCC3: s->succ3 = value; break;
+    case ERAY_PRTC1: s->prtc1 = value; break;
+    case ERAY_PRTC2: s->prtc2 = value; break;
+    case ERAY_MRC: s->fifo_start = value & 0xff; break;
+    case ERAY_FCL: s->fifo_depth = value & 0xff; break;
     default: break;
     }
     eray_update_irq(s);
@@ -191,11 +236,13 @@ static void eray_reset(DeviceState *dev)
 {
     TriCoreERAYState *s = TRICORE_ERAY(dev);
     s->ccsv = POC_CONFIG;
-    s->ccev = s->succ1 = s->nemc = s->mbsc1 = s->ndat1 = 0;
+    s->ccev = s->succ1 = s->succ2 = s->succ3 = s->nemc = 0;
+    s->prtc1 = s->prtc2 = s->mbsc1 = s->ndat1 = 0;
     s->command = s->cycle = s->slot_status = 0;
     s->mbid = s->mbctrl = 0;
     s->static_slots = 64; s->dynamic_start = 65; s->minislot = 1;
     s->guardian = 0; s->channel_mask = 3;
+    s->fifo_start = s->fifo_depth = s->fifo_status = 0;
     timer_del(s->scheduler);
     memset(s->msg_data, 0, sizeof(s->msg_data));
     eray_update_irq(s);
@@ -216,8 +263,10 @@ static void eray_realize(DeviceState *dev, Error **errp)
     g_autofree char *ram_name = g_strdup_printf("tricore-eray-msg-ram-%p", s);
     memory_region_init_io(&s->iomem, OBJECT(dev), &eray_ops, s,
                           "tricore-eray", 0x1000);
-    memory_region_init_ram(&s->msg_ram, OBJECT(dev), ram_name,
-                           sizeof(s->msg_data), &error_fatal);
+    /* Use the state-owned buffer as RAM backing so firmware writes are visible
+     * to the message handler and the same bytes are included in migration. */
+    memory_region_init_ram_ptr(&s->msg_ram, OBJECT(dev), ram_name,
+                               sizeof(s->msg_data), s->msg_data);
     s->scheduler = timer_new_ns(QEMU_CLOCK_VIRTUAL, eray_scheduler_cb, s);
     QTAILQ_INSERT_TAIL(&eray_bus, s, bus_node);
 }
@@ -226,7 +275,9 @@ static const VMStateDescription vmstate_eray = {
     .name = TYPE_TRICORE_ERAY, .version_id = 1, .minimum_version_id = 1,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32(ccsv, TriCoreERAYState), VMSTATE_UINT32(ccev, TriCoreERAYState),
-        VMSTATE_UINT32(succ1, TriCoreERAYState), VMSTATE_UINT32(nemc, TriCoreERAYState),
+        VMSTATE_UINT32(succ1, TriCoreERAYState), VMSTATE_UINT32(succ2, TriCoreERAYState),
+        VMSTATE_UINT32(succ3, TriCoreERAYState), VMSTATE_UINT32(nemc, TriCoreERAYState),
+        VMSTATE_UINT32(prtc1, TriCoreERAYState), VMSTATE_UINT32(prtc2, TriCoreERAYState),
         VMSTATE_UINT32(mbsc1, TriCoreERAYState), VMSTATE_UINT32(ndat1, TriCoreERAYState),
         VMSTATE_UINT32(command, TriCoreERAYState), VMSTATE_UINT32(cycle, TriCoreERAYState),
         VMSTATE_UINT32(slot_status, TriCoreERAYState), VMSTATE_UINT32(mbid, TriCoreERAYState),
@@ -234,6 +285,9 @@ static const VMStateDescription vmstate_eray = {
         VMSTATE_UINT32(static_slots, TriCoreERAYState), VMSTATE_UINT32(dynamic_start, TriCoreERAYState),
         VMSTATE_UINT32(minislot, TriCoreERAYState), VMSTATE_UINT32(guardian, TriCoreERAYState),
         VMSTATE_UINT32(channel_mask, TriCoreERAYState),
+        VMSTATE_UINT32(fifo_start, TriCoreERAYState), VMSTATE_UINT32(fifo_depth, TriCoreERAYState),
+        VMSTATE_UINT32(fifo_status, TriCoreERAYState),
+        VMSTATE_UINT8_ARRAY(msg_data, TriCoreERAYState, sizeof(((TriCoreERAYState *)0)->msg_data)),
         VMSTATE_END_OF_LIST()
     }
 };

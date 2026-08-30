@@ -56,6 +56,14 @@ static void test_eray_profiles(void)
     qtest_writel(global_qtest, 0xF441C124, 0);
     qtest_writel(global_qtest, 0xF441C128, 1);
     g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D12C), ==, 1);
+    /* Exercise the public FIFO configuration fields for a dynamic frame. */
+    qtest_writel(global_qtest, 0xF441D138, 0);   /* dynamic start */
+    qtest_writel(global_qtest, 0xF441D15C, 2);   /* FIFO first buffer */
+    qtest_writel(global_qtest, 0xF441D160, 2);   /* FIFO depth */
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D160), ==, 2);
+    qtest_writel(global_qtest, 0xF441E000, 100);
+    qtest_writel(global_qtest, 0xF441C128, 1);
+    g_assert_cmpuint(qtest_readl(global_qtest, 0xF441D160), ==, 2);
     qtest_quit(global_qtest);
 }
 

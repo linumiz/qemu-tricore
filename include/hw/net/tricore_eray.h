@@ -22,12 +22,14 @@ typedef struct TriCoreERAYState {
     MemoryRegion msg_ram;
     qemu_irq int0_irq;
     qemu_irq int1_irq;
-    uint32_t ccsv, ccev, succ1, nemc, mbsc1, ndat1;
+    uint32_t ccsv, ccev, succ1, succ2, succ3, nemc, mbsc1, ndat1;
+    uint32_t prtc1, prtc2;
     uint32_t command;
     uint32_t cycle;
     uint32_t slot_status;
     uint32_t mbid, mbctrl;
     uint32_t static_slots, dynamic_start, minislot, guardian, channel_mask;
+    uint32_t fifo_start, fifo_depth, fifo_status;
     QEMUTimer *scheduler;
     QTAILQ_ENTRY(TriCoreERAYState) bus_node;
     uint8_t msg_data[16 * 1024];
