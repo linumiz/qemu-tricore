@@ -74,6 +74,7 @@ struct CanBusState {
     Object object;
 
     QTAILQ_HEAD(, CanBusClientState) clients;
+    /* Virtual-time queue used by controllers that model frame duration. */
     QEMUTimer *event_timer;
     struct {
         CanBusClientState *sender;
@@ -103,6 +104,7 @@ static void can_bus_event_cb(void *opaque)
     if (!bus->event_count) {
         return;
     }
+    /* Select the earliest due frame; equal deadlines use CAN-ID priority. */
     uint64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
     unsigned selected = 0;
     for (unsigned i = 1; i < bus->event_count; i++) {
@@ -206,6 +208,7 @@ ssize_t can_bus_client_send_bits(CanBusClientState *client,
                                  const uint8_t *bits, size_t bit_count,
                                  uint64_t bit_time_ns, uint64_t start_time_ns)
 {
+    /* This path exposes sampled bus levels without changing legacy frames. */
     CanBusState *bus = client->bus;
     if (!bus || !bits || !bit_count || !bit_time_ns) {
         return -1;
@@ -227,6 +230,7 @@ ssize_t can_bus_client_send_bits(CanBusClientState *client,
 
 bool can_bus_wired_and(const bool *drives, size_t drive_count)
 {
+    /* CAN's dominant-low electrical rule is represented as boolean AND. */
     bool level = true;
     for (size_t i = 0; i < drive_count; i++) {
         level &= drives[i];
@@ -237,6 +241,7 @@ bool can_bus_wired_and(const bool *drives, size_t drive_count)
 ssize_t can_bus_arbitrate_bits(const uint8_t *streams, size_t sender_count,
                                size_t stream_stride, size_t bit_count)
 {
+    /* Remove senders that transmit recessive while another sender is dominant. */
     if (!streams || !sender_count || !stream_stride || !bit_count) {
         return -1;
     }
@@ -272,6 +277,7 @@ ssize_t can_bus_arbitrate_clients(CanBusClientState *const *senders,
                                   const uint8_t *streams, size_t sender_count,
                                   size_t stream_stride, size_t bit_count)
 {
+    /* Convert the winning bitstream into per-client loss notifications. */
     ssize_t winner = can_bus_arbitrate_bits(streams, sender_count,
                                              stream_stride, bit_count);
     if (winner < 0 || !senders) {
@@ -291,6 +297,7 @@ ssize_t can_bus_sample_clients(CanBusClientState *const *senders,
                                size_t stream_stride, size_t bit_count,
                                uint64_t bit_time_ns, uint64_t start_time_ns)
 {
+    /* Sample all senders at the same virtual instant and broadcast one bus level. */
     if (!senders || !streams || !sender_count || sender_count > 16 ||
         !stream_stride || !bit_count || !bit_time_ns) {
         return -1;
